@@ -84,13 +84,17 @@ one makes `check-generated` fail.
   `play_launch dump` of `isaac_simulator.launch.xml` resolves the same 205 nodes as acb's
   `carla_simulator.launch.xml` without its bridge).
 - The Isaac code (`aib.isaac`, `aib.runner`) is csb_isaac's ego, which drives csb's Isaac
-  exit runs, restructured: it has not been run from this repository yet. The camera is new
+  exit runs, restructured. The camera is new
   and untested on Isaac (off in the shipped rig, as on csb).
-- Powertrain: `ideal` (acb's contract: the requested acceleration is realized; the default)
-  and `ev` (the Model 3 RWD drive unit: motor envelope and lag, regen blended with lagged
-  friction brakes, ABS, traction control; road loads through the physics), unit-tested but
-  not yet run in Isaac (`just isaac-steptest`). `physx` and `fmu` are reserved
-  ([docs/design.md](docs/design.md)).
+- Powertrain: `ev`, the default (the Model 3 RWD drive unit: motor envelope and lag, regen
+  blended with lagged friction brakes, ABS, traction control; road loads through the
+  physics), and `ideal` (acb's contract: the requested acceleration is realized). Both
+  measured in Isaac (`just isaac-steptest`) and driven by Autoware on Town01 through
+  `just isaac-ego` + `just autoware` (docs/design.md, Validation). `physx` and `fmu` are
+  reserved.
+- The standalone runner has driven: `just isaac-ego` on Town01 with `just autoware`
+  (CYCLONEDDS_URI and RMW_IMPLEMENTATION the same on both; `realtime:=true`, or the world
+  outruns Autoware), acb's pilot to a goal, arrived.
 
 ## Documentation
 

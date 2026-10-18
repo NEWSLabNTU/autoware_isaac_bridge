@@ -70,8 +70,9 @@ tires:
   lat_stiff_max_load: 2.0     # in rest loads: where lateral stiffness stops growing
   lat_stiff_value: 17.0       # lateral stiffness there, N/rad per N of rest load
   long_stiff_value: 4612.5    # kg (x g: N per unit slip): 10 x a quarter-car rest load
-  # PhysX friction vs longitudinal slip: flat at the table's friction
-  friction_vs_slip: [[0.0, 1.0], [0.1, 1.0], [1.0, 1.0]]
+  # Grip (x the table's friction) vs longitudinal slip: full to the peak at 0.1, falling
+  # linearly to 0.8 with the wheel locked (provenance: tires.friction_vs_slip)
+  friction_vs_slip: [[0.0, 1.0], [0.1, 1.0], [1.0, 0.8]]
 
 brakes:
   max_brake_torque: 3000.0    # N m per wheel: past the tires, so a stop is friction-limited
@@ -82,14 +83,14 @@ brakes:
   time_constant: 0.06         # s
   # ABS (ev): each wheel's pressure released while its slip is past slip_release and
   # reapplied once it is back within slip_reapply; off below min_speed (m/s).
-  abs: {enabled: true, slip_release: 0.15, slip_reapply: 0.08, release_rate: 12.0, apply_rate: 4.0, min_speed: 1.5}
+  abs: {enabled: true, slip_release: 0.25, slip_reapply: 0.15, release_rate: 8.0, apply_rate: 4.0, min_speed: 1.5}
 
 powertrain:
   # The seam (docs/design.md, "Powertrain"): `ideal` realizes Autoware's acceleration as
   # per-wheel torque m a + F_resist(v), the contract acb has on CARLA; `ev` is the Model 3 RWD
   # drive unit below (motor envelope and lag, regen blended with the friction brakes, ABS,
   # traction control). `physx` (PhysX DriveStandard) and `fmu` are reserved.
-  model: ideal
+  model: ev
   max_drive_torque: 1500.0    # N m per wheel (ideal only): ~8 m/s^2
   # ev: one motor on the rear axle through a single-speed reduction and an open differential
   drive_axle: rear
@@ -101,7 +102,7 @@ powertrain:
   regen_max_torque: 130.0     # N m at the motor: ~0.2 g at the wheels
   regen_max_power: 60000.0    # W
   regen_fade_speeds: [1.0, 3.0]   # m/s: no regen at or below the first, full at or above the second
-  traction_control: {enabled: true, slip_limit: 0.15, slip_reapply: 0.08, release_rate: 20.0, apply_rate: 5.0}
+  traction_control: {enabled: true, slip_limit: 0.25, slip_reapply: 0.15, release_rate: 20.0, apply_rate: 5.0}
 
 # Road loads, applied to the body as a force (whatever the powertrain): rolling resistance
 # Crr m g and aerodynamic drag rho Cd A v^2 / 2. The powertrains' feedforward includes them.
@@ -201,10 +202,11 @@ provenance:
   inertia.inertia_box: {assumed: true, basis: "uniform box of the body: yaw 3909 kg m^2 at 1760 kg, close to m a b = 3959"}
   wheels.mass: {assumed: true, basis: "a wheel and tire of this size"}
   tires: {assumed: true, basis: "dry asphalt; the PhysX vehicle's usual passenger-car tire"}
+  tires.friction_vs_slip: {assumed: true, basis: "dry asphalt grip falls past its peak to 0.65 (Burckhardt model, dry asphalt: c1 1.2801, c2 23.99, c3 0.52: peak 1.17 at slip 0.17, 0.76 locked) to 0.92 (Pacejka Magic Formula, dry tarmac B 10, C 1.9, D 1, E 0.97, as in MathWorks' Tire-Road Interaction (Magic Formula) block: 0.91 locked) of the peak when the wheel locks; 0.8 is between. The peak sits at 0.1 because this PhysX tire's force saturates there (longitudinal stiffness 10 x the rest load). User decision 2026-10-19; it applies to ideal and ev alike"}
   brakes.max_brake_torque: {basis: "chosen past the tire limit, so a stop is friction-limited (~1 g) as on a real car"}
   brakes.dead_time: {assumed: true, basis: "a brake-by-wire booster (Model 3: Bosch iBooster) builds pressure in ~0.1-0.2 s; dead time of order 0.1 s"}
   brakes.time_constant: {assumed: true, basis: "with dead_time: ~95 % of the requested pressure 0.26 s after the request"}
-  brakes.abs: {assumed: true, basis: "slip thresholds around the PhysX tire's peak (~0.07-0.12 slip at mu 1 under braking load); rates tuned for a stable cycle at 60 Hz"}
+  brakes.abs: {assumed: true, basis: "tuned in Isaac (aib.steptest brake_100, 2026-10-19): PhysX slip at the tire peak is ~0.1-0.13 under braking load; release past 0.25 / reapply below 0.15 at 8 / 4 per s stopped shortest of five settings on a realistic friction curve, and never locked"}
   powertrain.max_drive_torque: {basis: "chosen: ~8 m/s^2, beyond what Autoware asks (ideal)"}
   powertrain.drive_axle: {basis: "Model 3 RWD: one rear permanent-magnet motor (3D7), no front motor (Tesla Model 3 owner's manual, Motor Type(s))"}
   powertrain.gear_ratio: {basis: "Tesla Model 3 owner's manual: single-speed fixed gear 9.03:1; scaled by 0.370 / 0.334 m (the CARLA body's wheel vs the Model 3's 235/45R18) so the force at the road and the motor speed per road speed are the real car's"}

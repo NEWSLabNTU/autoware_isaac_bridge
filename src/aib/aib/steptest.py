@@ -12,6 +12,7 @@ CSV of every frame goes to DIR, and a summary of the measurements to DIR/summary
 - `launch`:    full request from standstill: 0-100 km/h and 0-60 mph times
 - `brake_100`: 100 km/h, then -12 m/s^2 (past the tires): the stopping distance from 100
 - `regen_60`:  60 km/h, then -1.5 m/s^2 (all regen) and -4 m/s^2 (regen + friction)
+- `coast`:     100 km/h, then neutral: the road load's deceleration against the model's
 - `steps`:     at 10 m/s, +1.5 m/s^2 then -3 m/s^2 steps: the response's dead time and lag
 - `accel_brake`, `hard_brake`, `limit_brake`: csb's step-response sequences (roadmap 043)
 """
@@ -88,6 +89,18 @@ def steps(t, v, memo):
     return speed_hold(0.0, v, limit=2.0), 0.0
 
 
+def coast(t, v, memo):
+    """To 100 km/h, then neutral: the road load alone (checks the body force)."""
+    if t < 1.0:
+        return 0.0, 0.0
+    if not memo.get("coasting"):
+        if v >= 100 * KMH:
+            memo["coasting"] = True
+        else:
+            return 10.0, 60.0
+    return 0.0, 30.0, "neutral"
+
+
 def accel_brake(t, v, memo):
     if t < 1.0:
         return 0.0, 0.0
@@ -115,6 +128,7 @@ TESTS = {
     "brake_100": (24.0, brake_100),
     "regen_60": (24.0, regen_60),
     "steps": (20.0, steps),
+    "coast": (30.0, coast),
     "accel_brake": (11.0, accel_brake),
     "hard_brake": (16.0, _brake_from_15(8.0)),
     "limit_brake": (16.0, _brake_from_15(12.0)),
@@ -184,9 +198,18 @@ def measure(test, rows):
                 "regen_decel": round(_mean(r["regen_force"] for r in seg) / r_mass(), 3),
                 "friction_torque_sum": round(_mean(r["brake_sum"] for r in seg), 1),
             }
+    if test == "coast":
+        seg = [r for r in rows if r["neutral"] and 70 * KMH <= r["v"] <= 90 * KMH]
+        if seg:
+            out["decel_70_90_kmh"] = round(-_mean(r["a"] for r in seg), 4)
+            out["expected"] = round(_EXPECT[0](_mean(r["v"] for r in seg)), 4)
+            out["mean_pitch_z"] = round(_mean(r["pitch_z"] for r in seg), 5)
     if test in ("steps", "accel_brake"):
+        # `steps`: from a 10 m/s cruise (t = 8 s) and 13 m/s (t = 14 s); `accel_brake`: from
+        # standstill (the hold brake's release included) and from +1.5
+        at = {"steps": {1.5: 8.0, -3.0: 14.0}}.get(test, {1.5: 0.0, -3.0: 0.0})
         for req in (1.5, -3.0):
-            i0 = _first(rows, lambda r: abs(r["cmd_a"] - req) < 1e-6)
+            i0 = _first(rows, lambda r: abs(r["cmd_a"] - req) < 1e-6 and r["t"] > at[req] + 1e-6)
             if i0 is None:
                 continue
             base = _mean(r["a"] for r in rows[max(0, i0 - 10):i0])
@@ -206,6 +229,7 @@ def measure(test, rows):
 
 
 _MASS = [1.0]
+_EXPECT = [lambda v: float("nan")]
 
 
 def r_mass():
@@ -227,7 +251,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log = logging.getLogger("aib.steptest")
-    from .control import GEAR_DRIVE, Command, State
+    from .control import GEAR_DRIVE, GEAR_NEUTRAL, Command, State
     from .rig import EgoConfig
 
     cfg = EgoConfig.load(args.ego)
@@ -241,6 +265,13 @@ def main(argv=None):
     rig = cfg.load_rig()
     params = rig.vehicle
     _MASS[0] = params.mass
+    from . import powertrain as pt
+
+    def expected(v):
+        m = params.mass + 2 * params.wheel_mass
+        return (-pt.resistance(params, v)
+                + 4 * params.wheel_damping_rate * v / params.wheel_radius ** 2) / m
+    _EXPECT[0] = expected
     label = args.label or params.powertrain
     out = Path(args.out) / label
     out.mkdir(parents=True, exist_ok=True)
@@ -292,7 +323,9 @@ def main(argv=None):
             v_prev = state.velocity[0]
             while t < length - 1e-9:
                 v = state.velocity[0]
-                cmd.acceleration, cmd.velocity = command(t, v, memo)
+                c = command(t, v, memo)
+                cmd.acceleration, cmd.velocity = c[0], c[1]
+                cmd.gear = GEAR_NEUTRAL if len(c) > 2 else GEAR_DRIVE
                 for _ in range(SUB):
                     veh.apply(cmd, dt, state)
                     world.step(render=False)
@@ -311,7 +344,7 @@ def main(argv=None):
                        "regen_force": dbg.get("regen_force", 0.0),
                        "tc": dbg.get("tc", 1.0),
                        "abs_min": min(dbg.get("abs", (1.0,))),
-                       "pitch_z": state.position[2]}
+                       "pitch_z": state.position[2], "neutral": int(cmd.gear == GEAR_NEUTRAL)}
                 for name, w in zip(("fl", "fr", "rl", "rr"), ws):
                     row[f"slip_{name}"] = w.slip if w else 0.0
                     row[f"omega_{name}"] = w.rotation_speed if w else 0.0

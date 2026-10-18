@@ -53,6 +53,11 @@ IS_FRONT = (True, True, False, False)
 RPM = 2 * math.pi / 60  # rad/s per rpm
 # Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
 ROLLING_RAMP = 0.5  # m/s
+# A releasing brake below this is released: PhysX keeps a slow wheel in its sticky-tire hold
+# while any brake torque at all is applied, so a pressure decaying exponentially towards 0
+# held the car for seconds (seen in Isaac: 6 s at full drive torque with 1e-10 N m left).
+# 50 N m is ~0.03 m/s^2 of braking per wheel; with the lags, the hold releases in ~0.3 s.
+BRAKE_FLOOR = 50.0  # N m
 
 
 class Torques(NamedTuple):
@@ -212,7 +217,9 @@ class SlipModulator:
     """Slip-based release and reapply of one actuator, as ABS does a wheel's brake pressure
     and traction control the motor's torque: a factor in [0, 1] that falls at `release_rate`
     (1/s) while the slip is past `release`, climbs back at `apply_rate` once it is within
-    `reapply`, and holds in between. The slip is a magnitude in the direction limited."""
+    `reapply`, and creeps back at a quarter of that in between (a pure hold there can park
+    the factor below 1 for good while the tire works at its peak). The slip is a magnitude in
+    the direction limited."""
 
     def __init__(self, release, reapply, release_rate, apply_rate):
         self.release, self.reapply = release, reapply
@@ -230,6 +237,8 @@ class SlipModulator:
             self.factor = max(0.0, self.factor - self.release_rate * dt)
         elif slip < self.reapply:
             self.factor = min(1.0, self.factor + self.apply_rate * dt)
+        else:
+            self.factor = min(1.0, self.factor + 0.25 * self.apply_rate * dt)
         return self.factor
 
     def reset(self):
@@ -267,6 +276,7 @@ class EvPowertrain(Powertrain):
         for m in self.abs:
             m.reset()
         self.tc.reset()
+        self.abs_event = False  # ABS has worked a wheel in this stop: no regen until it ends
         self.debug = {}
 
     def motor_speed(self, speed, wheels):
@@ -287,6 +297,8 @@ class EvPowertrain(Powertrain):
         hold = _holding(cmd, speed)
         regen_force = 0.0
         friction = (0.0, 0.0)  # per wheel friction torque requests, front and rear axle
+        if hold or cmd.gear == GEAR_NEUTRAL or abs(speed) < p.abs_min_speed:
+            self.abs_event = False
         if hold or cmd.gear == GEAR_NEUTRAL:
             request = 0.0
             if hold:
@@ -294,16 +306,23 @@ class EvPowertrain(Powertrain):
         else:
             push = feedforward(p, cmd.acceleration, direction * speed)
             if push >= 0:
+                self.abs_event = False
                 request = min(push * r / ratio, motor_limit(p, omega))
             else:
                 brake = -push
-                # Regeneration first, unless ABS is working a wheel: the brake controller
-                # then hands all braking to the friction brakes.
-                available = (0.0 if any(m.active for m in self.abs)
-                             else regen_limit(p, omega, speed))
+                # Regeneration first, unless ABS has worked a wheel in this stop: the brake
+                # controller then hands all braking to the friction brakes until the stop
+                # ends (handing it back mid-stop would leave a gap the size of the
+                # hydraulics' lag every time ABS lets go).
+                if any(m.active for m in self.abs):
+                    self.abs_event = True
+                available = 0.0 if self.abs_event else regen_limit(p, omega, speed)
                 regen_force = min(brake, available * ratio / r)
                 request = -regen_force * r / ratio
-                friction = self.split_friction(brake, regen_force, -cmd.acceleration)
+                # The axle split follows the deceleration the car can reach: an EBD works
+                # from the measured deceleration, which the tires cap near mu g.
+                decel = min(-cmd.acceleration, p.tire_friction * G)
+                friction = self.split_friction(brake, regen_force, decel)
         # The motor: the inverter's torque lag, within the envelope at the present speed.
         limit = motor_limit(p, omega)
         self.motor_torque = lag(self.motor_torque, request, dt, p.motor_time_constant)
@@ -321,6 +340,8 @@ class EvPowertrain(Powertrain):
         for i in range(2):
             delayed = self.brake_delay[i].step(friction[i], dt)
             self.pressure[i] = lag(self.pressure[i], delayed, dt, p.brake_time_constant)
+            if self.pressure[i] < BRAKE_FLOOR and delayed < BRAKE_FLOOR:
+                self.pressure[i] = 0.0
         # ABS per wheel on its slip against the direction of travel (regen counts as braking
         # on a driven wheel); off below abs_min_speed, where the slip means little.
         abs_on = (p.abs_enabled and wheels is not None and not hold

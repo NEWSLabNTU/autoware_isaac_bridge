@@ -72,12 +72,12 @@ class ParamsTest(unittest.TestCase):
 class IdealPowertrainTest(unittest.TestCase):
     def setUp(self):
         # No road load or wheel damping: the force is m a alone
-        self.p = VehicleParams(rolling_coefficient=0.0, drag_coefficient=0.0,
-                               wheel_damping_rate=0.0)
+        self.p = VehicleParams(powertrain="ideal", rolling_coefficient=0.0,
+                               drag_coefficient=0.0, wheel_damping_rate=0.0)
         self.pt = powertrain.make(self.p)
         self.mass = self.p.mass + 2 * self.p.wheel_mass  # four wheels at 0.5 m r^2 / r^2
 
-    def test_it_is_the_default(self):
+    def test_it_is_ideal(self):
         self.assertEqual(self.pt.name, "ideal")
 
     def test_standing_still_holds(self):
@@ -119,7 +119,7 @@ class IdealPowertrainTest(unittest.TestCase):
     def test_the_road_load_is_in_the_feedforward(self):
         # The physics applies the road load to the body; ideal pushes against it, so a
         # cruise at a = 0 still needs drive (and the request is still realized).
-        p = VehicleParams(wheel_damping_rate=0.0)
+        p = VehicleParams(powertrain="ideal", wheel_damping_rate=0.0)
         drive, _ = powertrain.make(p).torques(Command(acceleration=0.0, velocity=20.0), 20.0, 0.01)
         load = -powertrain.resistance(p, 20.0)
         self.assertAlmostEqual(load, p.rolling_coefficient * p.mass * G

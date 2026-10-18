@@ -214,6 +214,13 @@ class LagTest(unittest.TestCase):
         out = run(ev(), Command(acceleration=1.0, velocity=3.0, gear=GEAR_NEUTRAL), 3.0, 1.0)[-1]
         self.assertEqual(out, ((0.0,) * 4, (0.0,) * 4))
 
+    def test_released_brakes_are_zero_not_nearly(self):
+        # PhysX holds a slow wheel on any brake torque, however small
+        m = ev()
+        run(m, Command(), 0.0, 1.0)
+        out = run(m, Command(acceleration=1.0, velocity=5.0), 0.0, 1.0)[-1]
+        self.assertEqual(out.brake, (0.0,) * 4)
+
     def test_reset_forgets(self):
         m = ev()
         run(m, Command(acceleration=-3.0), 10.0, 1.0)
@@ -229,18 +236,25 @@ class AbsTest(unittest.TestCase):
         self.assertLess(regen, 0.0)
         full = m.pressure[0]
         # the front left locks (slip -1): its pressure drops, the others keep theirs
-        out = run(m, cmd, 20.0, 0.1, slips=(-1.0, 0.0, 0.0, 0.0))[-1]
+        out = run(m, cmd, 20.0, 0.15, slips=(-1.0, 0.0, 0.0, 0.0))[-1]
         self.assertLess(out.brake[0], 0.1 * full)
         self.assertAlmostEqual(out.brake[1], m.pressure[0])
         self.assertGreaterEqual(m.pressure[0], full)
         # while ABS works, regen is handed to the friction brakes (through the motor's lag)
         self.assertLess(abs(sum(out.drive)), 0.15 * abs(regen))
-        # between the thresholds it holds; within the reapply threshold it comes back
+        # between the thresholds it creeps back; within the reapply threshold it comes back
         held = m.abs[0].factor
-        run(m, cmd, 20.0, 0.1, slips=(-0.1, 0.0, 0.0, 0.0))
-        self.assertEqual(m.abs[0].factor, held)
+        run(m, cmd, 20.0, 0.1, slips=(-0.2, 0.0, 0.0, 0.0))
+        self.assertAlmostEqual(m.abs[0].factor, held + 0.25 * m.p.abs_apply_rate * 0.1,
+                               delta=0.01)
         out = run(m, cmd, 20.0, 0.5, slips=(-0.02, 0.0, 0.0, 0.0))[-1]
         self.assertAlmostEqual(out.brake[0], m.pressure[0])
+        # regen stays with the friction brakes for the rest of the stop, and comes back after
+        self.assertFalse(any(x.active for x in m.abs))
+        self.assertLess(abs(sum(out.drive)), 1.0)
+        run(m, Command(acceleration=0.5, velocity=20.0), 20.0, 0.1)
+        out = run(m, cmd, 20.0, 0.5)[-1]
+        self.assertLess(sum(out.drive), 0.0)
 
     def test_a_cycle_on_a_simple_wheel_stays_bounded(self):
         # A wheel against a friction-limited tire: brake torque past the tire's spins it

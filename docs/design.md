@@ -98,7 +98,7 @@ longitudinal slip, on ground) `Vehicle.sample` read back from PhysX after the pr
 | model | status | what |
 |---|---|---|
 | `ideal` | implemented | acb's contract on CARLA: the force `m a + F_resist(v)` (wheel inertia included) as equal drive torque on four wheels, capped; a negative force is braking only, split by the dynamic axle load (ideal distribution); hold brake when standing with no request or in park. No lag, no limits but the caps |
-| `ev` | implemented | an electric drive unit: motor torque/power envelope, gear reduction, torque lag; regeneration blended with the friction brakes; brake hydraulics (dead time, first-order); ABS per wheel and traction control on slip |
+| `ev` | implemented, default | an electric drive unit: motor torque/power envelope, gear reduction, torque lag; regeneration blended with the friction brakes; brake hydraulics (dead time, first-order); ABS per wheel and traction control on slip |
 | `physx` | reserved | PhysX DriveStandard (engine torque curve, gears, clutch, differential); the command mapped to throttle/brake through accel and brake maps, as a real vehicle interface does |
 | `fmu` | reserved | an FMI 2.0 co-simulation unit (a supplier's powertrain model) stepped each substep |
 
@@ -155,7 +155,32 @@ from published data, with their sources and which are estimates in the spec's pr
 `just isaac-steptest` (`aib.steptest`) builds the rig's vehicle in Isaac on a flat ground
 plane, no ROS, and runs open-loop tests (0-100 km/h, 100-0 braking, regen at 60 km/h,
 acceleration and braking steps, csb 043's step-response sequences), writing a CSV per test
-and `summary.json`. Not yet run in Isaac: the shipped spec keeps `ideal` as its default until it has been, and until Autoware is shown to track the `ev` car.
+and `summary.json` (`set:=field=value` overrides, repeatable). The shipped spec, measured
+2026-10-19 (flat ground, friction 1.0; "flat" is the earlier flat grip curve, "realistic"
+the spec's grip falling to 0.8 at lock):
+
+| | `ev` | `ideal` | published (Model 3 RWD) |
+|---|---|---|---|
+| 0-100 km/h | 6.45 s (0-60 mph 6.16 s; 0.27 s of it the hold brake releasing) | 3.16 s | 6.1 s (Tesla EU), 5.8 s 0-60 mph |
+| 100-0 km/h, ABS, realistic / flat grip | 42.9 m / 42.3 m, no wheel locked | - (no ABS) | ~40 m |
+| 100-0 km/h, no ABS, realistic / flat grip | 44.1 m / 40.9 m, wheels locked | 43.3 m / 39.6 m | |
+| regen at ~55 km/h | -1.5 m/s^2 asked: all regen, no friction; at most ~2.0 m/s^2 (0.20 g) | friction only | ~0.2 g |
+| +1.5 m/s^2 step from 10 m/s: t10 / t63 / t90 | 0.02 / 0.08 / 0.13 s | 0.01 / 0.035 / 0.05 s | |
+| -3 m/s^2 step from 13 m/s: t10 / t63 / t90 | 0.01 / 0.10 / 0.19 s (regen first, friction after its dead time) | 0.005 / 0.034 / 0.048 s | |
+| coast 90-70 km/h, neutral | 0.276 m/s^2 (model 0.276: the road load force acts as modelled) | 0.271 | |
+
+ABS's thresholds were tuned with this test on the realistic curve: of five settings, release
+past 0.25 / reapply below 0.15 at 8 / 4 per s stopped shortest, 1.2 m inside the locked-wheel
+stop. On the flat curve a locked wheel loses nothing, so ABS can only lose there (it keeps
+the car steerable). The 0-100 time is 0.35 s over Tesla's: 0.27 s is the hold brake's release
+(dead time and lag, the start is from a hold), the rest the PhysX tire's slip at launch
+(0.16; a twice as stiff tire gives 6.31 s).
+
+Closed loop: `just isaac-ego` on Town01 (the SimReady world) with `just autoware` and acb's
+pilot driving town01_ego_drive's route (190.8, -130.1) to (120.0, -129.8): arrived; median
+|commanded - delivered| acceleration 0.018 m/s^2 for `ev` (459 samples), 0.016 for `ideal`,
+against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
+
 
 ## Sensors
 

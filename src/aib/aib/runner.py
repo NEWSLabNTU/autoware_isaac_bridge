@@ -89,6 +89,12 @@ def main(argv=None):
     world.play()
     physx = omni.physx.get_physx_interface()
     ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name)
+    # The chassis box is the collider, not a body: the roof lidar sees it (11400 points of
+    # the ego itself in Autoware's obstacle cloud, which then stops for "route-obstacle"), so
+    # hide it from rendering as csb does when it puts a catalogue body on the ego.
+    from pxr import UsdGeom
+
+    UsdGeom.Imageable(stage.GetPrimAtPath(ego.vehicle.body_path)).MakeInvisible()
 
     def warm_step():
         ego.before_substep(dt)

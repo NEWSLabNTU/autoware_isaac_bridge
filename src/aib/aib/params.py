@@ -41,9 +41,9 @@ class VehicleParams:
     lat_stiff_max_load: float = 2.0
     lat_stiff_value: float = 17.0
     long_stiff_value: float = 4612.5
-    friction_vs_slip: tuple = ((0.0, 1.0), (0.1, 1.0), (1.0, 1.0))
+    friction_vs_slip: tuple = ((0.0, 1.0), (0.1, 1.0), (1.0, 0.8))
     # Actuation
-    powertrain: str = "ideal"
+    powertrain: str = "ev"
     max_drive_torque: float = 1500.0  # per wheel, N m (ideal)
     max_brake_torque: float = 3000.0  # per wheel, N m
     hold_brake_torque: float = 1500.0  # per wheel, N m
@@ -53,9 +53,9 @@ class VehicleParams:
     brake_time_constant: float = 0.06  # s
     # ABS (ev): per wheel, on longitudinal slip against the direction of travel
     abs_enabled: bool = True
-    abs_slip_release: float = 0.15
-    abs_slip_reapply: float = 0.08
-    abs_release_rate: float = 12.0  # 1/s, of the brake pressure factor
+    abs_slip_release: float = 0.25
+    abs_slip_reapply: float = 0.15
+    abs_release_rate: float = 8.0  # 1/s, of the brake pressure factor
     abs_apply_rate: float = 4.0  # 1/s
     abs_min_speed: float = 1.5  # m/s
     # Electric drive unit (ev)
@@ -72,8 +72,8 @@ class VehicleParams:
     regen_fade_high: float = 3.0  # m/s: full regen at or above
     # Traction control (ev): driven wheels' slip cuts motor torque
     tc_enabled: bool = True
-    tc_slip_limit: float = 0.15
-    tc_slip_reapply: float = 0.08
+    tc_slip_limit: float = 0.25
+    tc_slip_reapply: float = 0.15
     tc_release_rate: float = 20.0  # 1/s, of the motor torque factor
     tc_apply_rate: float = 5.0  # 1/s
     # Road loads, applied to the body as a force (all models)

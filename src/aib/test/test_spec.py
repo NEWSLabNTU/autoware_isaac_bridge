@@ -33,7 +33,8 @@ class ShippedSpecTest(unittest.TestCase):
         self.assertEqual((p.suspension_frequency, p.suspension_damping_ratio), (1.6, 0.45))
         self.assertEqual(p.physx_substeps, 8)
         self.assertEqual(p.min_active_slip_denominator, 4.0)
-        self.assertEqual(p.powertrain, "ideal")
+        self.assertEqual(p.powertrain, "ev")
+        self.assertEqual(p.friction_vs_slip, ((0.0, 1.0), (0.1, 1.0), (1.0, 0.8)))
         self.assertEqual((p.drive_axle, p.gear_ratio, p.motor_peak_torque, p.motor_peak_power),
                          ("rear", 10.0, 340.0, 194000.0))
         self.assertEqual((p.regen_fade_low, p.regen_fade_high), (1.0, 3.0))

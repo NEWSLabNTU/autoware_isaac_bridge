@@ -115,7 +115,8 @@ isaac-ego *args:
 #   out:=<dir>          where the CSVs and summary.json go (default /mnt/disk1/aib-ev/steptest)
 #   powertrain:=<model> override the rig's (ev, ideal)
 #   only:=a,b           some of: launch brake_100 regen_60 steps accel_brake hard_brake limit_brake
-#   set:=k=v[,k=v]      VehicleParams overrides; label:=<name> the run's subdirectory
+#   set:=k=v            a VehicleParams override (JSON values; repeat for more); label:=<name> the
+#                       run's subdirectory
 [positional-arguments]
 isaac-steptest *args:
     #!/usr/bin/env bash
@@ -128,7 +129,7 @@ isaac-steptest *args:
             only:=*) extra+=(--only "${a#only:=}") ;;
             label:=*) extra+=(--label "${a#label:=}") ;;
             world:=*) extra+=(--world "${a#world:=}") ;;
-            set:=*) IFS=, read -ra kv <<< "${a#set:=}"; for x in "${kv[@]}"; do extra+=(--set "$x"); done ;;
+            set:=*) extra+=(--set "${a#set:=}") ;;
             *) echo "unknown argument $a" >&2; exit 2 ;;
         esac
     done
@@ -143,7 +144,11 @@ isaac-steptest *args:
 autoware *args:
     #!/usr/bin/env bash
     set -e
+    # Autoware's setup.bash sets its own CYCLONEDDS_URI; keep the caller's, which must be the
+    # Isaac side's (`just isaac-ego`), or the two never discover each other.
+    dds_uri="${CYCLONEDDS_URI:-}"
     source "{{autoware_setup}}"
+    if [ -n "$dds_uri" ]; then export CYCLONEDDS_URI="$dds_uri"; fi
     if [ -n "{{acb_setup}}" ]; then source "{{acb_setup}}"; fi
     source "{{project}}/install/setup.bash"
     export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
