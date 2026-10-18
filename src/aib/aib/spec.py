@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .frames import compose, mount_transform
 from .params import VehicleParams
-from .powertrain import MODELS
+from .powertrain import DRIVE_AXLES, MODELS
 
 SPEC_VERSION = 1
 SENSOR_TYPES = ("lidar", "camera", "imu", "gnss")
@@ -30,8 +30,15 @@ SECTIONS = {
     "wheels": (("mass",), ("damping_rate",)),
     "tires": (("friction",), ("lat_stiff_max_load", "lat_stiff_value", "long_stiff_value",
                               "friction_vs_slip")),
-    "brakes": (("max_brake_torque",), ("hold_brake_torque", "distribution")),
-    "powertrain": (("model", "max_drive_torque"), ("rolling_resistance",)),
+    "brakes": (("max_brake_torque",), ("hold_brake_torque", "distribution", "dead_time",
+                                        "time_constant", "abs")),
+    "powertrain": (("model", "max_drive_torque"),
+                   ("drive_axle", "front_drive_share", "gear_ratio", "motor_peak_torque",
+                    "motor_peak_power", "motor_max_rpm", "motor_time_constant",
+                    "regen_max_torque", "regen_max_power", "regen_fade_speeds",
+                    "traction_control")),
+    "resistance": ((), ("rolling_coefficient", "drag_coefficient", "frontal_area",
+                        "air_density")),
     "steering": ((), ("ackermann", "time_constant", "rate_limit")),
     "suspension": (("frequency", "damping_ratio", "travel"), ()),
     "physx": ((), ("substeps", "substep_threshold_speed", "min_active_slip_denominator",
@@ -49,6 +56,18 @@ SENSOR_EXTRA = {
     "gnss": ("rate_hz",),
 }
 BRAKE_DISTRIBUTIONS = ("dynamic_axle_load", "static")
+# Nested mappings: (section, key) -> their keys (all optional)
+SUBSECTIONS = {
+    ("brakes", "abs"): ("enabled", "slip_release", "slip_reapply", "release_rate",
+                        "apply_rate", "min_speed"),
+    ("powertrain", "traction_control"): ("enabled", "slip_limit", "slip_reapply",
+                                         "release_rate", "apply_rate"),
+}
+# What an `ev` powertrain cannot do without
+EV_REQUIRED = ("gear_ratio", "motor_peak_torque", "motor_peak_power", "motor_max_rpm")
+# Keys that moved, with where to
+MOVED = {("powertrain", "rolling_resistance"):
+         "resistance.rolling_coefficient (a road load applied through the physics)"}
 
 
 class SpecError(ValueError):
@@ -99,13 +118,40 @@ def validate(doc, where="spec"):
         missing = [k for k in required if k not in body]
         if missing:
             fail(f"{section}: missing {missing}")
+        for k in body:
+            if (section, k) in MOVED:
+                fail(f"{section}.{k} is gone: use {MOVED[(section, k)]}")
         extra = set(body) - set(required) - set(optional)
         if extra:
             fail(f"{section}: unknown key(s) {sorted(extra)}")
+        for k, v in body.items():
+            keys = SUBSECTIONS.get((section, k))
+            if keys is None:
+                continue
+            if not isinstance(v, dict):
+                fail(f"{section}.{k} is not a mapping")
+            extra = set(v) - set(keys)
+            if extra:
+                fail(f"{section}.{k}: unknown key(s) {sorted(extra)}")
     _check_mount(doc["sensor_kit"]["mount"], "sensor_kit.mount", fail)
-    model = doc["powertrain"]["model"]
+    pt = doc["powertrain"]
+    model = pt["model"]
     if model not in MODELS:
         fail(f"powertrain.model {model!r}: one of {', '.join(MODELS)}")
+    if model == "ev":
+        missing = [k for k in EV_REQUIRED if k not in pt]
+        if missing:
+            fail(f"powertrain: an ev needs {missing}")
+        for k in EV_REQUIRED:
+            if not float(pt[k]) > 0:
+                fail(f"powertrain.{k} must be positive")
+    axle = pt.get("drive_axle", "rear")
+    if axle not in DRIVE_AXLES:
+        fail(f"powertrain.drive_axle {axle!r}: one of {', '.join(DRIVE_AXLES)}")
+    fade = pt.get("regen_fade_speeds")
+    if fade is not None and not (isinstance(fade, list) and len(fade) == 2
+                                 and 0 <= float(fade[0]) < float(fade[1])):
+        fail("powertrain.regen_fade_speeds must be [low, high] m/s, 0 <= low < high")
     dist = doc["brakes"].get("distribution", "dynamic_axle_load")
     if dist not in BRAKE_DISTRIBUTIONS:
         fail(f"brakes.distribution {dist!r}: one of {', '.join(BRAKE_DISTRIBUTIONS)}")
@@ -165,6 +211,9 @@ def vehicle_params(spec):
     d = spec.doc
     g, i, w, t = d["geometry"], d["inertia"], d["wheels"], d["tires"]
     b, p = d["brakes"], d["powertrain"]
+    rs = d.get("resistance")
+    abs_ = b.get("abs") or {}
+    tc = p.get("traction_control") or {}
     st, su, px = spec.section("steering"), d["suspension"], spec.section("physx")
     base = VehicleParams()
     values = dict(
@@ -182,16 +231,35 @@ def vehicle_params(spec):
         long_stiff_value=t.get("long_stiff_value", base.long_stiff_value),
         friction_vs_slip=tuple(tuple(x) for x in t.get("friction_vs_slip", base.friction_vs_slip)),
         powertrain=p["model"], max_drive_torque=p["max_drive_torque"],
-        rolling_resistance=p.get("rolling_resistance", 0.0),
         max_brake_torque=b["max_brake_torque"],
         hold_brake_torque=b.get("hold_brake_torque", base.hold_brake_torque),
         brake_distribution=b.get("distribution", base.brake_distribution),
+        brake_dead_time=b.get("dead_time", base.brake_dead_time),
+        brake_time_constant=b.get("time_constant", base.brake_time_constant),
         ackermann=bool(st.get("ackermann", True)),
         steer_time_constant=st.get("time_constant", 0.0),
         steer_rate_limit=st.get("rate_limit", 0.0),
         suspension_frequency=su["frequency"], suspension_damping_ratio=su["damping_ratio"],
         suspension_travel=su["travel"],
     )
+    for key, field in (("enabled", "abs_enabled"), ("slip_release", "abs_slip_release"),
+                       ("slip_reapply", "abs_slip_reapply"), ("release_rate", "abs_release_rate"),
+                       ("apply_rate", "abs_apply_rate"), ("min_speed", "abs_min_speed")):
+        values[field] = abs_.get(key, getattr(base, field))
+    for key in ("drive_axle", "front_drive_share", "gear_ratio", "motor_peak_torque",
+                "motor_peak_power", "motor_max_rpm", "motor_time_constant", "regen_max_torque",
+                "regen_max_power"):
+        values[key] = p.get(key, getattr(base, key))
+    fade = p.get("regen_fade_speeds", (base.regen_fade_low, base.regen_fade_high))
+    values["regen_fade_low"], values["regen_fade_high"] = fade
+    for key, field in (("enabled", "tc_enabled"), ("slip_limit", "tc_slip_limit"),
+                       ("slip_reapply", "tc_slip_reapply"), ("release_rate", "tc_release_rate"),
+                       ("apply_rate", "tc_apply_rate")):
+        values[field] = tc.get(key, getattr(base, field))
+    # No `resistance` section: no road load (a spec says what its car has).
+    for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
+        values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)
+    values["air_density"] = (rs or {}).get("air_density", base.air_density)
     names = {"substeps": "physx_substeps"}
     for k, v in px.items():
         values[names.get(k, k)] = v

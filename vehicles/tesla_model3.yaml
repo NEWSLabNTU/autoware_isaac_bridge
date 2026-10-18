@@ -12,11 +12,13 @@
 #
 # Values come from carla-scenario-bridge (csb) as of commit 4aefee8 ("the ego is a plausible
 # real Model 3, not CARLA's car", roadmap 043): src/csb_isaac/csb_isaac/vehicle_params.py,
-# config/acb_ego.yaml, and acb's vehicle_info / sensor kit calibration it read. Values marked
-# under `provenance` with `assumed: true` are estimates, not measurements.
+# config/acb_ego.yaml, and acb's vehicle_info / sensor kit calibration it read. The drivetrain,
+# the mass and the road loads are the Model 3 RWD's (2024 "Highland", rear 3D7 motor) from
+# published data: no drive logs exist to fit against. Values marked under `provenance` with
+# `assumed: true` are estimates, not measurements.
 spec_version: 1
 name: tesla_model3
-description: Tesla Model 3 Long Range AWD (physics) on the CARLA vehicle.tesla.model3 body (geometry)
+description: Tesla Model 3 RWD (physics, drivetrain) on the CARLA vehicle.tesla.model3 body (geometry)
 
 autoware:
   vehicle_model: aib_vehicle
@@ -52,8 +54,8 @@ mirror:
   max_height_offset: 1.5
 
 inertia:
-  mass: 1845.0                # kg, curb
-  com_front_fraction: 0.48    # share of the static load on the front axle (CoM from rear axle / wheel base)
+  mass: 1760.0                # kg, curb (RWD)
+  com_front_fraction: 0.47    # share of the static load on the front axle (CoM from rear axle / wheel base)
   com_lateral: 0.0            # m, + left
   com_height: 0.46            # m above the ground
   # Inertia as of a uniform box this size (m): mass/12 x (l^2 + w^2) etc.
@@ -75,14 +77,39 @@ brakes:
   max_brake_torque: 3000.0    # N m per wheel: past the tires, so a stop is friction-limited
   hold_brake_torque: 1500.0   # N m per wheel, standing still or in park
   distribution: dynamic_axle_load   # ideal distribution (EBD): front share = dynamic front load
+  # The hydraulics (ev): a pure dead time, then the pressure's first-order build-up.
+  dead_time: 0.08             # s
+  time_constant: 0.06         # s
+  # ABS (ev): each wheel's pressure released while its slip is past slip_release and
+  # reapplied once it is back within slip_reapply; off below min_speed (m/s).
+  abs: {enabled: true, slip_release: 0.15, slip_reapply: 0.08, release_rate: 12.0, apply_rate: 4.0, min_speed: 1.5}
 
 powertrain:
   # The seam (docs/design.md, "Powertrain"): `ideal` realizes Autoware's acceleration as
-  # per-wheel torque m a + F_resist(v), the contract acb has on CARLA. `physx` (PhysX
-  # DriveStandard), `ev` and `fmu` are reserved and not implemented.
+  # per-wheel torque m a + F_resist(v), the contract acb has on CARLA; `ev` is the Model 3 RWD
+  # drive unit below (motor envelope and lag, regen blended with the friction brakes, ABS,
+  # traction control). `physx` (PhysX DriveStandard) and `fmu` are reserved.
   model: ideal
-  max_drive_torque: 1500.0    # N m per wheel: ~8 m/s^2, past the 0-100 km/h 4.4 s
-  rolling_resistance: 0.0     # N per (m/s), added to the requested force
+  max_drive_torque: 1500.0    # N m per wheel (ideal only): ~8 m/s^2
+  # ev: one motor on the rear axle through a single-speed reduction and an open differential
+  drive_axle: rear
+  gear_ratio: 10.0            # effective: Tesla's 9.03:1 for the CARLA body's larger wheel (provenance)
+  motor_peak_torque: 340.0    # N m at the motor, to base speed (194 kW / 340 N m = 5450 rpm)
+  motor_peak_power: 194000.0  # W, constant above base speed
+  motor_max_rpm: 15200.0      # torque tapers to 0 over the last 5 %: ~201 km/h
+  motor_time_constant: 0.04   # s, first-order torque lag (inverter, motor, driveline)
+  regen_max_torque: 130.0     # N m at the motor: ~0.2 g at the wheels
+  regen_max_power: 60000.0    # W
+  regen_fade_speeds: [1.0, 3.0]   # m/s: no regen at or below the first, full at or above the second
+  traction_control: {enabled: true, slip_limit: 0.15, slip_reapply: 0.08, release_rate: 20.0, apply_rate: 5.0}
+
+# Road loads, applied to the body as a force (whatever the powertrain): rolling resistance
+# Crr m g and aerodynamic drag rho Cd A v^2 / 2. The powertrains' feedforward includes them.
+resistance:
+  rolling_coefficient: 0.0095
+  drag_coefficient: 0.23
+  frontal_area: 2.2           # m^2
+  air_density: 1.2            # kg/m^3
 
 steering:
   ackermann: true             # the bicycle angle split into Ackermann angles for the front wheels
@@ -168,14 +195,30 @@ sensors:
 # measurement when one exists.
 provenance:
   geometry: {basis: "acb vehicle_info: CARLA 0.9.16 vehicle.tesla.model3 (a real Model 3 is 2.875 / 1.58 / 0.334 m); kept so Autoware, the body and the physics are one car"}
-  inertia.mass: {basis: "Model 3 Long Range AWD curb mass 1830-1851 kg by model year"}
-  inertia.com_front_fraction: {assumed: true, basis: "road-test weight splits around 47-48 % front"}
+  inertia.mass: {basis: "Model 3 RWD (2024) curb mass 1760 kg (evspecifications.com/en/model/5f1c3d0)"}
+  inertia.com_front_fraction: {assumed: true, basis: "road-test weight splits around 47-48 % front; the RWD's rear motor puts it at the low end"}
   inertia.com_height: {assumed: true, basis: "a floor battery pack puts the CoM low"}
-  inertia.inertia_box: {assumed: true, basis: "uniform box of the body: yaw 4097 kg m^2, close to m a b = 4155"}
+  inertia.inertia_box: {assumed: true, basis: "uniform box of the body: yaw 3909 kg m^2 at 1760 kg, close to m a b = 3959"}
   wheels.mass: {assumed: true, basis: "a wheel and tire of this size"}
   tires: {assumed: true, basis: "dry asphalt; the PhysX vehicle's usual passenger-car tire"}
   brakes.max_brake_torque: {basis: "chosen past the tire limit, so a stop is friction-limited (~1 g) as on a real car"}
-  powertrain.max_drive_torque: {basis: "chosen: ~8 m/s^2, beyond what Autoware asks"}
+  brakes.dead_time: {assumed: true, basis: "a brake-by-wire booster (Model 3: Bosch iBooster) builds pressure in ~0.1-0.2 s; dead time of order 0.1 s"}
+  brakes.time_constant: {assumed: true, basis: "with dead_time: ~95 % of the requested pressure 0.26 s after the request"}
+  brakes.abs: {assumed: true, basis: "slip thresholds around the PhysX tire's peak (~0.07-0.12 slip at mu 1 under braking load); rates tuned for a stable cycle at 60 Hz"}
+  powertrain.max_drive_torque: {basis: "chosen: ~8 m/s^2, beyond what Autoware asks (ideal)"}
+  powertrain.drive_axle: {basis: "Model 3 RWD: one rear permanent-magnet motor (3D7), no front motor (Tesla Model 3 owner's manual, Motor Type(s))"}
+  powertrain.gear_ratio: {basis: "Tesla Model 3 owner's manual: single-speed fixed gear 9.03:1; scaled by 0.370 / 0.334 m (the CARLA body's wheel vs the Model 3's 235/45R18) so the force at the road and the motor speed per road speed are the real car's"}
+  powertrain.motor_peak_torque: {basis: "Tesla Model 3 owner's manual, motor 3D7: 194 kW, 340 N m; evspecifications lists 194 kW at 5400 rpm (440 N m there is not Tesla's figure)"}
+  powertrain.motor_peak_power: {basis: "Tesla Model 3 owner's manual, motor 3D7: 194 kW; peak, i.e. battery and inverter permitting"}
+  powertrain.motor_max_rpm: {assumed: true, basis: "set so that the taper reaches Tesla's 201 km/h top speed (Model 3 RWD 2024)"}
+  powertrain.motor_time_constant: {assumed: true, basis: "inverter torque response is a few ms; the driveline's anti-jerk shaping makes the wheel torque's tens of ms"}
+  powertrain.regen_max_torque: {assumed: true, basis: "Tesla quoted 0.2 g maximum regen deceleration for Model 3 (0.3 g in Track Mode; Electrek 2018); 0.2 g x 1760 kg x 0.370 m / 10.0"}
+  powertrain.regen_max_power: {assumed: true, basis: "owner reports of ~60-70 kW peak regen for Model 3 (no Tesla figure); 60 kW"}
+  powertrain.regen_fade_speeds: {assumed: true, basis: "regen fades out at walking pace, where the friction brakes (hold) take over"}
+  powertrain.traction_control: {assumed: true, basis: "slip limit just past the PhysX tire's peak under drive; motor torque cut fast (the inverter acts in ms)"}
+  resistance.rolling_coefficient: {assumed: true, basis: "low-rolling-resistance OEM tires (Model 3: Michelin Primacy MXM4 class), Crr 0.008-0.010"}
+  resistance.drag_coefficient: {basis: "Tesla: Cd 0.23 for Model 3"}
+  resistance.frontal_area: {assumed: true, basis: "~2.2 m^2, InsideEVs / Engineering Explained estimate (from the Model S's)"}
   suspension: {assumed: true, basis: "a sedan's ride"}
   physx: {basis: "csb roadmap 043: the braking instability fix"}
   sensors: {basis: "acb acb_sensor_kit calibration, as csb's Isaac ego mounts it"}

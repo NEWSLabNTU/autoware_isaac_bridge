@@ -86,8 +86,11 @@ one makes `check-generated` fail.
 - The Isaac code (`aib.isaac`, `aib.runner`) is csb_isaac's ego, which drives csb's Isaac
   exit runs, restructured: it has not been run from this repository yet. The camera is new
   and untested on Isaac (off in the shipped rig, as on csb).
-- Powertrain: only `ideal` (acb's contract: the requested acceleration is realized). The
-  seam for `physx`, `ev` and `fmu` models is in place ([docs/design.md](docs/design.md)).
+- Powertrain: `ideal` (acb's contract: the requested acceleration is realized; the default)
+  and `ev` (the Model 3 RWD drive unit: motor envelope and lag, regen blended with lagged
+  friction brakes, ABS, traction control; road loads through the physics), unit-tested but
+  not yet run in Isaac (`just isaac-steptest`). `physx` and `fmu` are reserved
+  ([docs/design.md](docs/design.md)).
 
 ## Documentation
 

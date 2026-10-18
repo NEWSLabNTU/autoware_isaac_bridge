@@ -67,6 +67,14 @@ test: check-generated
         echo "(not built: skipping the URDF check; run just build)"
     fi
 
+# The pure unit tests under Isaac's Python (3.12), as the Isaac side imports them
+test-isaac:
+    #!/usr/bin/env bash
+    set -e
+    export ISAAC_ROOT={{isaac_root}}
+    source "{{project}}/src/aib/scripts/isaac_env.sh"
+    cd "{{project}}/src/aib/test" && python -m unittest -q
+
 # Lint the Python (pyflakes) and run the tests
 check: test
     python3 -m pyflakes src/aib
@@ -102,6 +110,32 @@ isaac-ego *args:
     export PYTHONPATH="{{project}}/src/aib:$PYTHONPATH"
     exec python -m aib.runner --ego "$ego" --world "$world" --pose="$pose" \
         --display "$display" "${extra[@]}"
+
+# Open-loop step tests of the PhysX vehicle and powertrain in Isaac, no ROS (aib.steptest):
+#   out:=<dir>          where the CSVs and summary.json go (default /mnt/disk1/aib-ev/steptest)
+#   powertrain:=<model> override the rig's (ev, ideal)
+#   only:=a,b           some of: launch brake_100 regen_60 steps accel_brake hard_brake limit_brake
+#   set:=k=v[,k=v]      VehicleParams overrides; label:=<name> the run's subdirectory
+[positional-arguments]
+isaac-steptest *args:
+    #!/usr/bin/env bash
+    set -e
+    out=/mnt/disk1/aib-ev/steptest; extra=()
+    for a in "$@"; do
+        case "$a" in
+            out:=*) out="${a#out:=}" ;;
+            powertrain:=*) extra+=(--powertrain "${a#powertrain:=}") ;;
+            only:=*) extra+=(--only "${a#only:=}") ;;
+            label:=*) extra+=(--label "${a#label:=}") ;;
+            world:=*) extra+=(--world "${a#world:=}") ;;
+            set:=*) IFS=, read -ra kv <<< "${a#set:=}"; for x in "${kv[@]}"; do extra+=(--set "$x"); done ;;
+            *) echo "unknown argument $a" >&2; exit 2 ;;
+        esac
+    done
+    export ISAAC_ROOT={{isaac_root}}
+    source "{{project}}/src/aib/scripts/isaac_env.sh"
+    export PYTHONPATH="{{project}}/src/aib:$PYTHONPATH"
+    exec python -m aib.steptest --out "$out" "${extra[@]}"
 
 # Autoware for the Isaac ego (aib_launch isaac_simulator.launch.xml) on ROS_DOMAIN_ID
 # (default 1, the ego config's). map_path:=<dir> is required; other name:=value pass through.

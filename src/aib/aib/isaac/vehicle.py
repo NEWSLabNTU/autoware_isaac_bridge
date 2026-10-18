@@ -6,11 +6,17 @@ expects. Geometry and physics are the rig's `VehicleParams` (generated from the 
 spec), the suspension tuned per axle to one frequency so the car sits level.
 
 PhysX drives it with no engine model ("drive none"): each wheel's drive torque, brake torque
-and steer angle are set directly, every substep, from the powertrain (`aib.powertrain`) and
-the steering actuator (`aib.control`).
+and steer angle are set directly, every physics step, from the powertrain (`aib.powertrain`)
+and the steering actuator (`aib.control`). The road loads (rolling resistance, aerodynamic
+drag: `aib.powertrain.resistance`) are a force on the body at its centre of mass
+(PhysxForceAPI), set every step from the body's speed. Each step's wheel states (spin,
+longitudinal slip) are read back for the powertrain's ABS and traction control.
 """
 import math
 
+from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_IS_ON_GROUND,
+                                        VEHICLE_WHEEL_STATE_ROTATION_SPEED,
+                                        VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP)
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
@@ -73,6 +79,12 @@ class Vehicle:
         body.CreateSleepThresholdAttr(0)
         body.CreateStabilizationThresholdAttr(0)
         body.CreateDisableGravityAttr(True)  # the vehicle simulation applies gravity
+        # The road loads: a force at the centre of mass, in the body frame, set every step.
+        force = PhysxSchema.PhysxForceAPI.Apply(prim)
+        force.CreateModeAttr(PhysxSchema.Tokens.force)
+        force.CreateWorldFrameEnabledAttr(False)
+        force.CreateForceEnabledAttr(True)
+        self.road_load = force.CreateForceAttr(Gf.Vec3f(0, 0, 0))
 
         v = PhysxSchema.PhysxVehicleAPI.Apply(prim)
         v.CreateVehicleEnabledAttr(True)
@@ -96,6 +108,8 @@ class Vehicle:
         # at z = r: base_link on the ground at rest.
         frame_z = r + (p.suspension_travel - sag)
         self.wheels = []
+        self.wheel_paths = [f"{path}/{name}" for name, _, _ in WHEELS]
+        self.wheel_states = None  # aib.powertrain.WheelState per wheel, after a step
         for i, (name, is_front, side) in enumerate(WHEELS):
             x, y = (L if is_front else 0.0), side * half_t
             sprung, k, c = front_axle if is_front else rear_axle
@@ -161,6 +175,7 @@ class Vehicle:
             .CreateIncludesRel().AddTarget(cube.GetPath())
         self.body_path = cube.GetPath()
         self.tire_angle = 0.0
+        self.torques = None  # the last step's aib.powertrain.Torques
         self.last = None  # (position, quat, velocity in world) of the last substep
 
     # --- Pose ------------------------------------------------------------------------------
@@ -182,6 +197,8 @@ class Vehicle:
         except Exception:  # noqa: BLE001 - not simulated yet: the USD pose is all there is
             pass
         self.last = None
+        self.wheel_states = None
+        self.road_load.Set(Gf.Vec3f(0, 0, 0))
         self.powertrain.reset()
 
     # --- Actuation -------------------------------------------------------------------------
@@ -194,14 +211,33 @@ class Vehicle:
             left, right = ackermann(self.tire_angle, p.wheel_base, p.wheel_tread)
         else:
             left = right = self.tire_angle
-        drive, (brake_front, brake_rear) = self.powertrain.torques(cmd, state.velocity[0], dt)
+        speed = state.velocity[0]
+        self.torques = self.powertrain.torques(cmd, speed, dt, self.wheel_states)
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
-        for (is_front, d, b, s), angle in zip(self.wheels, angles):
+        for (_, d, b, s), drive, brake, angle in zip(self.wheels, self.torques.drive,
+                                                     self.torques.brake, angles):
             d.Set(drive)
-            b.Set(brake_front if is_front else brake_rear)
+            b.Set(brake)
             s.Set(angle)
+        self.road_load.Set(Gf.Vec3f(powertrains.resistance(p, speed), 0.0, 0.0))
 
     # --- State -----------------------------------------------------------------------------
+
+    def _wheel_states(self, physx):
+        """Each wheel's spin and longitudinal slip after the step (None if PhysX has none)."""
+        out = []
+        for wp in self.wheel_paths:
+            try:
+                w = physx.get_wheel_state(wp)
+            except Exception:  # noqa: BLE001 - not simulated yet
+                return None
+            if not w:
+                return None
+            out.append(powertrains.WheelState(
+                float(w[VEHICLE_WHEEL_STATE_ROTATION_SPEED]),
+                float(w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP]),
+                bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])))
+        return out
 
     def sample(self, physx, dt, state: State):
         """Read the body after one physics step; velocities by difference (base_link frame)."""
@@ -224,6 +260,7 @@ class Vehicle:
             omega = (0.0, 0.0, 0.0) if s < 1e-12 else tuple(c / s * angle / dt for c in dq[1:])
             acc = qrot(qconj(q), tuple((a - b) / dt for a, b in zip(vel_w, lv)))
         self.last = (pos, q, vel_w)
+        self.wheel_states = self._wheel_states(physx)
         state.position = pos
         state.quat = q
         state.velocity = qrot(qconj(q), vel_w)

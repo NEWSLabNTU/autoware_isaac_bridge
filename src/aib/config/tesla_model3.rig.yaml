@@ -3,9 +3,11 @@
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: vehicles/tesla_model3.yaml
 name: tesla_model3
-description: Tesla Model 3 Long Range AWD (physics) on the CARLA vehicle.tesla.model3 body (geometry)
-assumptions: [inertia.com_front_fraction, inertia.com_height, inertia.inertia_box, suspension, tires,
-  wheels.mass]
+description: Tesla Model 3 RWD (physics, drivetrain) on the CARLA vehicle.tesla.model3 body (geometry)
+assumptions: [brakes.abs, brakes.dead_time, brakes.time_constant, inertia.com_front_fraction, inertia.com_height,
+  inertia.inertia_box, powertrain.motor_max_rpm, powertrain.motor_time_constant, powertrain.regen_fade_speeds,
+  powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control, resistance.frontal_area,
+  resistance.rolling_coefficient, suspension, tires, wheels.mass]
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.532, 0.0, 0.744]
@@ -17,8 +19,8 @@ vehicle:
   wheel_radius: 0.37
   wheel_width: 0.235
   max_steer_angle: 0.7
-  mass: 1845.0
-  com: [1.4424, 0.0, 0.46]
+  mass: 1760.0
+  com: [1.41235, 0.0, 0.46]
   inertia_box: [4.8, 1.9, 1.4]
   wheel_mass: 20.0
   wheel_damping_rate: 0.25
@@ -35,7 +37,34 @@ vehicle:
   max_brake_torque: 3000.0
   hold_brake_torque: 1500.0
   brake_distribution: dynamic_axle_load
-  rolling_resistance: 0.0
+  brake_dead_time: 0.08
+  brake_time_constant: 0.06
+  abs_enabled: true
+  abs_slip_release: 0.15
+  abs_slip_reapply: 0.08
+  abs_release_rate: 12.0
+  abs_apply_rate: 4.0
+  abs_min_speed: 1.5
+  drive_axle: rear
+  front_drive_share: 0.0
+  gear_ratio: 10.0
+  motor_peak_torque: 340.0
+  motor_peak_power: 194000.0
+  motor_max_rpm: 15200.0
+  motor_time_constant: 0.04
+  regen_max_torque: 130.0
+  regen_max_power: 60000.0
+  regen_fade_low: 1.0
+  regen_fade_high: 3.0
+  tc_enabled: true
+  tc_slip_limit: 0.15
+  tc_slip_reapply: 0.08
+  tc_release_rate: 20.0
+  tc_apply_rate: 5.0
+  rolling_coefficient: 0.0095
+  drag_coefficient: 0.23
+  frontal_area: 2.2
+  air_density: 1.2
   ackermann: true
   steer_time_constant: 0.0
   steer_rate_limit: 0.0

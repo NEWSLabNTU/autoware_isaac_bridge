@@ -17,14 +17,15 @@ class ShippedSpecTest(unittest.TestCase):
     def setUp(self):
         self.spec = specmod.load(SPEC)
 
-    def test_it_is_csbs_model3(self):
-        # csb 4aefee8's vehicle_params.py: the plausible real Model 3
+    def test_it_is_csbs_model3_as_the_rwd(self):
+        # csb 4aefee8's vehicle_params.py (the plausible real Model 3), with the RWD's mass,
+        # weight split and drive unit
         p = specmod.vehicle_params(self.spec)
         self.assertEqual((p.wheel_base, p.wheel_tread, p.wheel_radius, p.wheel_width),
                          (3.005, 1.667, 0.370, 0.235))
         self.assertEqual(p.max_steer_angle, 0.70)
-        self.assertEqual(p.mass, 1845.0)
-        self.assertAlmostEqual(p.com[0], 0.48 * 3.005)
+        self.assertEqual(p.mass, 1760.0)
+        self.assertAlmostEqual(p.com[0], 0.47 * 3.005)
         self.assertEqual(p.com[1:], (0.0, 0.46))
         self.assertEqual(p.tire_friction, 1.0)
         self.assertEqual(p.max_brake_torque, 3000.0)
@@ -33,6 +34,11 @@ class ShippedSpecTest(unittest.TestCase):
         self.assertEqual(p.physx_substeps, 8)
         self.assertEqual(p.min_active_slip_denominator, 4.0)
         self.assertEqual(p.powertrain, "ideal")
+        self.assertEqual((p.drive_axle, p.gear_ratio, p.motor_peak_torque, p.motor_peak_power),
+                         ("rear", 10.0, 340.0, 194000.0))
+        self.assertEqual((p.regen_fade_low, p.regen_fade_high), (1.0, 3.0))
+        self.assertTrue(p.abs_enabled and p.tc_enabled)
+        self.assertEqual((p.drag_coefficient, p.frontal_area), (0.23, 2.2))
 
     def test_the_library_defaults_are_the_spec(self):
         # VehicleParams() must not drift from the shipped spec it documents.
@@ -102,6 +108,45 @@ class ValidationTest(unittest.TestCase):
         d = doc()
         d["powertrain"]["model"] = "steam"
         self.refused(d, "powertrain.model 'steam'")
+
+    def test_an_ev_needs_its_drive_unit(self):
+        d = doc()
+        d["powertrain"]["model"] = "ev"
+        specmod.validate(d)
+        p = specmod.vehicle_params(specmod.Spec(SPEC, d))
+        self.assertEqual(p.powertrain, "ev")
+        del d["powertrain"]["gear_ratio"]
+        self.refused(d, "an ev needs ['gear_ratio']")
+        d = doc()
+        d["powertrain"]["model"] = "ev"
+        d["powertrain"]["motor_peak_power"] = 0
+        self.refused(d, "motor_peak_power must be positive")
+
+    def test_ev_keys_are_checked(self):
+        d = doc()
+        d["powertrain"]["drive_axle"] = "middle"
+        self.refused(d, "drive_axle 'middle'")
+        d = doc()
+        d["powertrain"]["regen_fade_speeds"] = [3.0, 1.0]
+        self.refused(d, "regen_fade_speeds")
+        d = doc()
+        d["brakes"]["abs"]["slip"] = 0.1
+        self.refused(d, "brakes.abs: unknown key(s) ['slip']")
+        d = doc()
+        d["powertrain"]["traction_control"] = True
+        self.refused(d, "powertrain.traction_control is not a mapping")
+
+    def test_rolling_resistance_moved_to_the_physics(self):
+        d = doc()
+        d["powertrain"]["rolling_resistance"] = 0.0
+        self.refused(d, "resistance.rolling_coefficient")
+
+    def test_no_resistance_section_is_no_road_load(self):
+        d = doc()
+        del d["resistance"]
+        p = specmod.vehicle_params(specmod.Spec(SPEC, d))
+        self.assertEqual((p.rolling_coefficient, p.drag_coefficient, p.frontal_area),
+                         (0.0, 0.0, 0.0))
 
     def test_a_mount_needs_all_six(self):
         d = doc()

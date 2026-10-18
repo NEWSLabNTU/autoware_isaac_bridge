@@ -51,8 +51,8 @@ class ParamsTest(unittest.TestCase):
         self.assertAlmostEqual(sag, G / (2 * math.pi * 1.6) ** 2)
 
     def test_yaw_inertia_is_a_sedans(self):
-        # csb 043: the box gives 4097 kg m^2, close to m a b = 4155
-        self.assertAlmostEqual(VehicleParams().diagonal_inertia()[2], 4097.0, delta=1.0)
+        # the box gives 3909 kg m^2 at 1760 kg, close to m a b = 3959
+        self.assertAlmostEqual(VehicleParams().diagonal_inertia()[2], 3908.7, delta=1.0)
 
     def test_check_geometry_names_both_numbers(self):
         ours = {"wheel_base": 3.005, "wheel_tread": 1.667, "wheel_radius": 0.37}
@@ -71,7 +71,9 @@ class ParamsTest(unittest.TestCase):
 
 class IdealPowertrainTest(unittest.TestCase):
     def setUp(self):
-        self.p = VehicleParams()
+        # No road load or wheel damping: the force is m a alone
+        self.p = VehicleParams(rolling_coefficient=0.0, drag_coefficient=0.0,
+                               wheel_damping_rate=0.0)
         self.pt = powertrain.make(self.p)
         self.mass = self.p.mass + 2 * self.p.wheel_mass  # four wheels at 0.5 m r^2 / r^2
 
@@ -80,45 +82,52 @@ class IdealPowertrainTest(unittest.TestCase):
 
     def test_standing_still_holds(self):
         drive, brakes = self.pt.torques(Command(), 0.0, 0.01)
-        self.assertEqual(drive, 0.0)
-        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 2)
+        self.assertEqual(drive, (0.0,) * 4)
+        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 4)
         _, brakes = self.pt.torques(Command(acceleration=1.0, velocity=5.0, gear=GEAR_PARK), 3.0, 0.01)
-        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 2)
+        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 4)
 
     def test_acceleration_is_m_a_over_four_wheels(self):
         drive, brakes = self.pt.torques(Command(acceleration=1.0, velocity=5.0), 2.0, 0.01)
-        self.assertAlmostEqual(drive, self.mass * 1.0 * self.p.wheel_radius / 4)
-        self.assertEqual(brakes, (0.0, 0.0))
+        for d in drive:
+            self.assertAlmostEqual(d, self.mass * 1.0 * self.p.wheel_radius / 4)
+        self.assertEqual(brakes, (0.0,) * 4)
 
     def test_drive_is_capped_and_reverse_drives_backwards(self):
         drive, _ = self.pt.torques(Command(acceleration=50.0, velocity=5.0), 2.0, 0.01)
-        self.assertEqual(drive, self.p.max_drive_torque)
+        self.assertEqual(drive, (self.p.max_drive_torque,) * 4)
         drive, _ = self.pt.torques(Command(acceleration=1.0, velocity=-2.0, gear=GEAR_REVERSE), -1.0, 0.01)
-        self.assertLess(drive, 0.0)
+        self.assertLess(drive[0], 0.0)
 
     def test_deceleration_brakes_split_by_dynamic_load(self):
-        drive, (front, rear) = self.pt.torques(Command(acceleration=-3.0, velocity=5.0), 7.4, 0.01)
-        self.assertEqual(drive, 0.0)
+        drive, (fl, fr, rl, rr) = self.pt.torques(Command(acceleration=-3.0, velocity=5.0), 7.4, 0.01)
+        self.assertEqual(drive, (0.0,) * 4)
+        self.assertEqual((fl, rl), (fr, rr))
         total = self.mass * 3.0 * self.p.wheel_radius
-        self.assertAlmostEqual(2 * (front + rear), total)
-        self.assertAlmostEqual(front / (front + rear), self.p.brake_split(3.0))
-        self.assertGreater(front, rear)
+        self.assertAlmostEqual(2 * (fl + rl), total)
+        self.assertAlmostEqual(fl / (fl + rl), self.p.brake_split(3.0))
+        self.assertGreater(fl, rl)
 
     def test_brakes_are_capped(self):
-        _, (front, rear) = self.pt.torques(Command(acceleration=-100.0, velocity=5.0), 10.0, 0.01)
-        self.assertEqual(front, self.p.max_brake_torque)
+        _, brakes = self.pt.torques(Command(acceleration=-100.0, velocity=5.0), 10.0, 0.01)
+        self.assertEqual(brakes[0], self.p.max_brake_torque)
 
     def test_neutral_coasts(self):
         self.assertEqual(self.pt.torques(Command(acceleration=1.0, velocity=3.0, gear=GEAR_NEUTRAL), 3.0, 0.01),
-                         (0.0, (0.0, 0.0)))
+                         ((0.0,) * 4, (0.0,) * 4))
 
-    def test_rolling_resistance_adds_force(self):
-        pt = powertrain.make(VehicleParams(rolling_resistance=100.0))
-        drive, _ = pt.torques(Command(acceleration=0.0, velocity=10.0), 10.0, 0.01)
-        self.assertAlmostEqual(drive, 1000.0 * 0.37 / 4)
+    def test_the_road_load_is_in_the_feedforward(self):
+        # The physics applies the road load to the body; ideal pushes against it, so a
+        # cruise at a = 0 still needs drive (and the request is still realized).
+        p = VehicleParams(wheel_damping_rate=0.0)
+        drive, _ = powertrain.make(p).torques(Command(acceleration=0.0, velocity=20.0), 20.0, 0.01)
+        load = -powertrain.resistance(p, 20.0)
+        self.assertAlmostEqual(load, p.rolling_coefficient * p.mass * G
+                               + 0.5 * 1.2 * 0.23 * 2.2 * 400.0)
+        self.assertAlmostEqual(sum(drive), load * p.wheel_radius)
 
     def test_reserved_models_fail_loudly(self):
-        for name in ("physx", "ev", "fmu"):
+        for name in ("physx", "fmu"):
             with self.assertRaises(NotImplementedError):
                 powertrain.make(VehicleParams(powertrain=name))
         with self.assertRaises(ValueError):

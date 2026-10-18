@@ -31,8 +31,8 @@ class VehicleParams:
     wheel_width: float = 0.235
     max_steer_angle: float = 0.70  # bicycle tire angle, rad
     # Inertia
-    mass: float = 1845.0
-    com: tuple = (0.48 * 3.005, 0.0, 0.46)  # base_link
+    mass: float = 1760.0
+    com: tuple = (0.47 * 3.005, 0.0, 0.46)  # base_link
     inertia_box: tuple = (4.8, 1.9, 1.4)  # m: the body's inertia as a uniform box this size
     # Wheels and tires
     wheel_mass: float = 20.0
@@ -44,11 +44,43 @@ class VehicleParams:
     friction_vs_slip: tuple = ((0.0, 1.0), (0.1, 1.0), (1.0, 1.0))
     # Actuation
     powertrain: str = "ideal"
-    max_drive_torque: float = 1500.0  # per wheel, N m
+    max_drive_torque: float = 1500.0  # per wheel, N m (ideal)
     max_brake_torque: float = 3000.0  # per wheel, N m
     hold_brake_torque: float = 1500.0  # per wheel, N m
     brake_distribution: str = "dynamic_axle_load"
-    rolling_resistance: float = 0.0  # N per (m/s)
+    # Friction brake hydraulics (ev): dead time, then a first-order pressure lag
+    brake_dead_time: float = 0.08  # s
+    brake_time_constant: float = 0.06  # s
+    # ABS (ev): per wheel, on longitudinal slip against the direction of travel
+    abs_enabled: bool = True
+    abs_slip_release: float = 0.15
+    abs_slip_reapply: float = 0.08
+    abs_release_rate: float = 12.0  # 1/s, of the brake pressure factor
+    abs_apply_rate: float = 4.0  # 1/s
+    abs_min_speed: float = 1.5  # m/s
+    # Electric drive unit (ev)
+    drive_axle: str = "rear"  # rear | front | all
+    front_drive_share: float = 0.0  # the front axle's share of motor torque when "all"
+    gear_ratio: float = 10.0  # motor to wheel, single speed
+    motor_peak_torque: float = 340.0  # N m at the motor shaft
+    motor_peak_power: float = 194000.0  # W
+    motor_max_rpm: float = 15200.0
+    motor_time_constant: float = 0.04  # s, the inverter/motor torque lag
+    regen_max_torque: float = 130.0  # N m at the motor shaft
+    regen_max_power: float = 60000.0  # W
+    regen_fade_low: float = 1.0  # m/s: no regen at or below
+    regen_fade_high: float = 3.0  # m/s: full regen at or above
+    # Traction control (ev): driven wheels' slip cuts motor torque
+    tc_enabled: bool = True
+    tc_slip_limit: float = 0.15
+    tc_slip_reapply: float = 0.08
+    tc_release_rate: float = 20.0  # 1/s, of the motor torque factor
+    tc_apply_rate: float = 5.0  # 1/s
+    # Road loads, applied to the body as a force (all models)
+    rolling_coefficient: float = 0.0095  # Crr
+    drag_coefficient: float = 0.23  # Cd
+    frontal_area: float = 2.2  # m^2
+    air_density: float = 1.2  # kg/m^3
     ackermann: bool = True
     steer_time_constant: float = 0.0  # s; 0: none
     steer_rate_limit: float = 0.0  # rad/s; 0: none

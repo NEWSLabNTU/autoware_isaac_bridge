@@ -17,7 +17,7 @@ Frame: base_link, the rear axle centre on the ground, x forward, y left, z up.
 | `geometry` | yes | below |
 | `mirror` | yes | Autoware's `mirror.param.yaml` keys, as is |
 | `inertia` | yes | below |
-| `wheels`, `tires`, `brakes`, `powertrain`, `steering`, `suspension`, `physx` | see below | |
+| `wheels`, `tires`, `brakes`, `powertrain`, `resistance`, `steering`, `suspension`, `physx` | see below | |
 | `sensor_kit` | yes | `mount`: base_link -> sensor_kit_base_link |
 | `sensors` | no | name -> sensor, below |
 | `provenance` | no | where numbers come from, below |
@@ -44,13 +44,29 @@ footprint and height these give.
 | `tires.lat_stiff_max_load`, `lat_stiff_value`, `long_stiff_value`, `friction_vs_slip` | same | PhysX's tire model: lateral stiffness graph (rest loads, N/rad per N of rest load), longitudinal stiffness per g, friction vs slip points |
 | `brakes.max_brake_torque`, `hold_brake_torque` | same | per wheel |
 | `brakes.distribution` | `brake_distribution` | `dynamic_axle_load` (ideal / EBD) or `static` |
-| `powertrain.model` | `powertrain` | `ideal`; `physx`, `ev`, `fmu` reserved (design.md) |
-| `powertrain.max_drive_torque`, `rolling_resistance` | same | per wheel; N per m/s |
+| `brakes.dead_time`, `time_constant` | `brake_dead_time`, `brake_time_constant` | `ev`: the hydraulics, a pure delay then a first-order pressure lag, s |
+| `brakes.abs.{enabled, slip_release, slip_reapply, release_rate, apply_rate, min_speed}` | `abs_*` | `ev`: per wheel, the pressure factor falls at `release_rate` (1/s) while the wheel's slip is past `slip_release`, climbs at `apply_rate` once within `slip_reapply`; off below `min_speed` m/s |
+| `powertrain.model` | `powertrain` | `ideal` or `ev`; `physx`, `fmu` reserved (design.md) |
+| `powertrain.max_drive_torque` | same | `ideal`'s cap, per wheel, N m |
+| `powertrain.drive_axle`, `front_drive_share` | same | `ev`: `rear`, `front` or `all` (then the front share of motor torque); each axle an open differential |
+| `powertrain.gear_ratio` | same | `ev`, required: motor to wheel, single speed |
+| `powertrain.motor_peak_torque`, `motor_peak_power`, `motor_max_rpm` | same | `ev`, required: the envelope, N m at the motor to base speed, then W; torque tapers to 0 over the last 5 % below the max rpm |
+| `powertrain.motor_time_constant` | same | `ev`: first-order torque lag, s |
+| `powertrain.regen_max_torque`, `regen_max_power` | same | `ev`: regeneration's limits, N m at the motor and W |
+| `powertrain.regen_fade_speeds` | `regen_fade_low`, `regen_fade_high` | `ev`: `[low, high]` m/s, no regen at or below `low`, full at or above `high` |
+| `powertrain.traction_control.{enabled, slip_limit, slip_reapply, release_rate, apply_rate}` | `tc_*` | `ev`: the motor torque factor on the driven wheels' largest slip, as ABS |
+| `resistance.rolling_coefficient`, `drag_coefficient`, `frontal_area`, `air_density` | same | the road load, applied to the body by the physics (all models): Crr m g, rho Cd A v^2 / 2. No section: no road load |
 | `steering.ackermann` | `ackermann` | split the bicycle angle into Ackermann wheel angles (default true) |
 | `steering.time_constant`, `rate_limit` | `steer_time_constant`, `steer_rate_limit` | actuator lag, rate limit; 0: none |
 | `suspension.frequency`, `damping_ratio`, `travel` | `suspension_*` | per axle on its sprung mass |
 | `physx.substeps` | `physx_substeps` | vehicle substeps per physics step, at every speed |
 | `physx.*` (others) | same name | slip denominators, sticky tire thresholds and damping |
+
+An `ev` spec must give `gear_ratio`, `motor_peak_torque`, `motor_peak_power` and
+`motor_max_rpm`; the other `ev` keys default to the shipped spec's. `ideal` ignores them, so
+one spec carries both and `powertrain.model` (or an ego config's `vehicle: {powertrain: ev}`)
+picks. `powertrain.rolling_resistance` (a force folded into `ideal`'s command, with no
+physical counterpart) is gone: a spec naming it is refused with a pointer to `resistance`.
 
 Every rig field is a `VehicleParams` field (`src/aib/aib/params.py`), so an ego config's
 `vehicle:` override uses the same names.

@@ -90,20 +90,72 @@ spec is csb's "plausible real Model 3" (csb roadmap 043, "As built: vehicle").
 ## Powertrain
 
 `aib.powertrain` is the seam between Autoware's longitudinal command and the wheels:
-`torques(cmd, speed, dt) -> (drive per wheel, (brake front, brake rear))`, chosen by the
-spec's `powertrain.model`.
+`torques(cmd, speed, dt, wheels) -> Torques(drive[4], brake[4])`, per wheel in `WHEELS`
+order, chosen by the spec's `powertrain.model`. `Vehicle.apply` calls it every physics step
+(1/60 s; PhysX substeps the vehicle 8 times inside each), with the wheel states (spin,
+longitudinal slip, on ground) `Vehicle.sample` read back from PhysX after the previous step.
 
 | model | status | what |
 |---|---|---|
-| `ideal` | implemented, default | acb's contract on CARLA: the force `m a + F_resist(v)` (wheel inertia included) as equal drive torque on four wheels, capped; a negative force is braking only, split by the dynamic axle load (ideal distribution); hold brake when standing with no request or in park |
+| `ideal` | implemented | acb's contract on CARLA: the force `m a + F_resist(v)` (wheel inertia included) as equal drive torque on four wheels, capped; a negative force is braking only, split by the dynamic axle load (ideal distribution); hold brake when standing with no request or in park. No lag, no limits but the caps |
+| `ev` | implemented | an electric drive unit: motor torque/power envelope, gear reduction, torque lag; regeneration blended with the friction brakes; brake hydraulics (dead time, first-order); ABS per wheel and traction control on slip |
 | `physx` | reserved | PhysX DriveStandard (engine torque curve, gears, clutch, differential); the command mapped to throttle/brake through accel and brake maps, as a real vehicle interface does |
-| `ev` | reserved | an electric drive unit per axle with a torque-speed envelope, regeneration blended with the friction brakes, actuator lag |
 | `fmu` | reserved | an FMI 2.0 co-simulation unit (a supplier's powertrain model) stepped each substep |
 
 A spec naming a reserved model fails at load (`NotImplementedError`), so nothing silently
 drives a different car. A new model is a `Powertrain` subclass registered in `make`; it may
-keep state (`reset()` is called on teleport). Models other than `ideal` will need more spec
-keys (maps, torque curves, an FMU path) under `powertrain:`; the spec format grows with them.
+keep state (`reset()` is called on teleport).
+
+### Road loads
+
+Rolling resistance (`Crr m g`, ramped in over the first 0.5 m/s) and aerodynamic drag
+(`rho Cd A v^2 / 2`) are a force on the body at its centre of mass (PhysxForceAPI, body
+frame), set every step from the body's speed by `Vehicle.apply`, whichever model drives. They
+are physics, not part of the command. Both models' feedforward (`powertrain.feedforward`)
+adds the same estimate plus PhysX's wheel damping (`4 c v / r^2`), so `ideal` still realizes
+the request exactly and `ev` starts from the right torque. Before, `ideal` added a
+`rolling_resistance` force (N per m/s, 0 in the spec) to the command with nothing in the
+physics to cancel it; that key is gone (a spec naming it is refused), and nothing counts a
+load twice.
+
+### `ev`
+
+Per physics step, along the gear's direction:
+
+1. **Feedforward.** `F = (m + 2 m_wheel) a_cmd + F_load(v) + F_wheel_damping(v)`.
+   Autoware's longitudinal controller closes the loop on top; there is no speed loop here.
+2. **Drive** (`F >= 0`): motor torque request `F r / G`, clamped to the envelope at the
+   motor speed (driven wheels' mean spin x G): peak torque to base speed (`P / T`), then
+   `P / omega`, tapering to 0 over the last 5 % below `motor_max_rpm`.
+3. **Braking** (`F < 0`): regeneration first, up to `min(regen_max_torque,
+   regen_max_power / omega, envelope)`, faded linearly to 0 between `regen_fade_high` and
+   `regen_fade_low` m/s; none while ABS is working any wheel. The friction brakes take the
+   rest: the total is split by the dynamic axle load, the regenerating axle's share goes to
+   regen first, and regen beyond that share (mild braking) takes the other axle's friction
+   off (series blending).
+4. **Motor**: the request through a first-order lag (`motor_time_constant`), re-clamped to
+   the envelope at the present speed. **Traction control** multiplies it by a factor that
+   falls while the driven wheels' largest slip is past `tc.slip_limit` and recovers below
+   `tc.slip_reapply`. The axle torque `T G` is halved over the driven axle's wheels (an
+   open differential); `all` splits it by `front_drive_share` first.
+5. **Friction brakes**: per axle, the request through a dead time (`brakes.dead_time`) and
+   a first-order pressure lag (`brakes.time_constant`); the hold brake goes the same way.
+   **ABS** multiplies each wheel's pressure by a factor that falls at `release_rate` while
+   that wheel's slip against the travel is past `slip_release`, holds between, and climbs at
+   `apply_rate` once within `slip_reapply`; off below `abs_min_speed` (where PhysX's slip
+   denominators make the slip meaningless). Each wheel's torque is capped at
+   `max_brake_torque`.
+
+What the car cannot do (past the envelope, inside the lags, past the tires) it does not do,
+and the controller sees the error, as on a real car. The parameters are the Model 3 RWD's
+from published data, with their sources and which are estimates in the spec's provenance.
+
+### Validation
+
+`just isaac-steptest` (`aib.steptest`) builds the rig's vehicle in Isaac on a flat ground
+plane, no ROS, and runs open-loop tests (0-100 km/h, 100-0 braking, regen at 60 km/h,
+acceleration and braking steps, csb 043's step-response sequences), writing a CSV per test
+and `summary.json`. Not yet run in Isaac: the shipped spec keeps `ideal` as its default until it has been, and until Autoware is shown to track the `ev` car.
 
 ## Sensors
 
