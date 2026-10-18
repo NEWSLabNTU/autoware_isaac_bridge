@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Isaac ego's vehicle interface: nothing to launch here.
+
+  Included by Autoware's tier4_vehicle_launch when vehicle_model:=aib_vehicle and
+  launch_vehicle_interface:=true. On Isaac the vehicle interface (/vehicle/status/*,
+  /control/command/*) lives in the process that steps the world -- aib's runner or
+  carla-scenario-bridge's world server, both in Isaac Sim's own Python -- not in a ROS node
+  this launch could start. isaac_simulator.launch.xml passes launch_vehicle_interface:=false.
+-->
+<launch>
+  <arg name="vehicle_id" default="default"/>
+  <arg name="raw_vehicle_cmd_converter_param_path" default=""/>
+  <arg name="initial_engage_state" default="false"/>
+</launch>

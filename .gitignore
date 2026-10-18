@@ -1,0 +1,21 @@
+# Editor
+*.swp
+*~
+
+# Python
+__pycache__/
+*.py[oc]
+.pytest_cache/
+
+# colcon
+build/
+install/
+log/
+
+# play_launch logs
+play_log/
+
+# Machine-specific environment
+.env
+.envrc
+.direnv/

@@ -1,0 +1,181 @@
+# The Isaac ego: a plausible real Tesla Model 3 on the CARLA Model 3 body's geometry.
+#
+# This file is the single source of truth for the vehicle. `just generate` writes from it:
+#   - Autoware's vehicle description (aib_vehicle_description/config/vehicle_info.param.yaml,
+#     mirror.param.yaml)
+#   - the sensor kit (aib_sensor_kit_description/config/sensors_calibration.yaml,
+#     sensor_kit_calibration.yaml, urdf/sensor_kit.xacro, and the same calibration under
+#     aib_individual_params/config/default/aib_sensor_kit/)
+#   - the Isaac rig the library builds the PhysX vehicle and sensors from
+#     (src/aib/config/tesla_model3.rig.yaml)
+# and `just check-generated` fails when any of them is stale. Format: docs/spec-format.md.
+#
+# Values come from carla-scenario-bridge (csb) as of commit 4aefee8 ("the ego is a plausible
+# real Model 3, not CARLA's car", roadmap 043): src/csb_isaac/csb_isaac/vehicle_params.py,
+# config/acb_ego.yaml, and acb's vehicle_info / sensor kit calibration it read. Values marked
+# under `provenance` with `assumed: true` are estimates, not measurements.
+spec_version: 1
+name: tesla_model3
+description: Tesla Model 3 Long Range AWD (physics) on the CARLA vehicle.tesla.model3 body (geometry)
+
+autoware:
+  vehicle_model: aib_vehicle
+  sensor_model: aib_sensor_kit
+
+body:
+  # The visual body a host may put on the vehicle: a CARLA blueprint id in csb's vehicle
+  # catalogue (CSB_VEHICLE_USD). Without a catalogue the chassis is the box below.
+  catalogue_model: vehicle.tesla.model3
+
+# What Autoware plans with (vehicle_info), and the PhysX wheel layout. base_link is the rear
+# axle centre on the ground, x forward, y left, z up. Metres, radians.
+geometry:
+  wheel_base: 3.005
+  wheel_tread: 1.667
+  wheel_radius: 0.370
+  wheel_width: 0.235
+  front_overhang: 0.923
+  rear_overhang: 0.864
+  left_overhang: 0.248
+  right_overhang: 0.248
+  vehicle_height: 1.488
+  # Bicycle-model tire angle limit: a planning limit (acb docs/issues/006), about a real car's
+  max_steer_angle: 0.70
+
+# mirror.param.yaml: only Autoware's planning simulator and the sensing crop box read it.
+mirror:
+  min_longitudinal_offset: 1.8
+  max_longitudinal_offset: 3.2
+  min_lateral_offset: -1.4
+  max_lateral_offset: 1.4
+  min_height_offset: 0.8
+  max_height_offset: 1.5
+
+inertia:
+  mass: 1845.0                # kg, curb
+  com_front_fraction: 0.48    # share of the static load on the front axle (CoM from rear axle / wheel base)
+  com_lateral: 0.0            # m, + left
+  com_height: 0.46            # m above the ground
+  # Inertia as of a uniform box this size (m): mass/12 x (l^2 + w^2) etc.
+  inertia_box: [4.8, 1.9, 1.4]
+
+wheels:
+  mass: 20.0                  # kg each; moment of inertia 0.5 m r^2
+  damping_rate: 0.25
+
+tires:
+  friction: 1.0               # dry asphalt
+  lat_stiff_max_load: 2.0     # in rest loads: where lateral stiffness stops growing
+  lat_stiff_value: 17.0       # lateral stiffness there, N/rad per N of rest load
+  long_stiff_value: 4612.5    # kg (x g: N per unit slip): 10 x a quarter-car rest load
+  # PhysX friction vs longitudinal slip: flat at the table's friction
+  friction_vs_slip: [[0.0, 1.0], [0.1, 1.0], [1.0, 1.0]]
+
+brakes:
+  max_brake_torque: 3000.0    # N m per wheel: past the tires, so a stop is friction-limited
+  hold_brake_torque: 1500.0   # N m per wheel, standing still or in park
+  distribution: dynamic_axle_load   # ideal distribution (EBD): front share = dynamic front load
+
+powertrain:
+  # The seam (docs/design.md, "Powertrain"): `ideal` realizes Autoware's acceleration as
+  # per-wheel torque m a + F_resist(v), the contract acb has on CARLA. `physx` (PhysX
+  # DriveStandard), `ev` and `fmu` are reserved and not implemented.
+  model: ideal
+  max_drive_torque: 1500.0    # N m per wheel: ~8 m/s^2, past the 0-100 km/h 4.4 s
+  rolling_resistance: 0.0     # N per (m/s), added to the requested force
+
+steering:
+  ackermann: true             # the bicycle angle split into Ackermann angles for the front wheels
+  time_constant: 0.0          # s, first-order actuator lag; 0: none
+  rate_limit: 0.0             # rad/s; 0: none
+
+suspension:
+  frequency: 1.6              # Hz, per axle on its own sprung mass, so the car sits level
+  damping_ratio: 0.45
+  travel: 0.2                 # m
+
+physx:
+  # The wheel's spin is stiff against the tire: at 1 substep per 1/60 s braking went unstable
+  # and locked the wheels (csb roadmap 043). 8 substeps at every speed and a 4 m/s active
+  # slip denominator track the request.
+  substeps: 8
+  substep_threshold_speed: 5.0
+  min_active_slip_denominator: 4.0
+  min_passive_slip_denominator: 4.0
+  min_lateral_slip_denominator: 1.0
+  sticky_tire_threshold_speed: 0.2
+  sticky_tire_threshold_time: 1.0
+  longitudinal_sticky_tire_damping: 200.0
+  lateral_sticky_tire_damping: 20.0
+
+# The sensor kit: base_link -> sensor_kit_base_link, then each sensor's mount in the kit.
+# Mounts are what csb's Isaac ego uses today (acb's acb_sensor_kit calibration).
+sensor_kit:
+  mount: {x: 0.9, y: 0.0, z: 2.0, roll: -0.001, pitch: 0.015, yaw: -0.0364}
+
+sensors:
+  top:
+    type: lidar
+    calibration_key: velodyne_top_base_link   # the key in sensor_kit_calibration.yaml
+    link: top_base_link                       # URDF link the mount places
+    frame: top                                # frame_id of the messages (child of link, identity)
+    topic: /sensing/lidar/top/pointcloud_before_sync
+    mount: {x: 0.0, y: 0.0, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 1.575}
+    channels: 128
+    rate_hz: 20.0
+    range: 200.0
+    vertical_fov: [-25.0, 15.0]   # deg (CARLA's ray-cast lidar beside it)
+    isaac:
+      enabled: true
+      config: OS1
+      variant: OS1_REV7_128ch20hz1024res
+  camera6:
+    type: camera
+    calibration_key: camera6/camera_link
+    link: camera6/camera_link
+    frame: camera6/camera_optical_link
+    topic: /sensing/camera/camera6/image_raw
+    info_topic: /sensing/camera/camera6/camera_info
+    mount: {x: 0.0, y: 0.0, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 0.0}
+    width: 1280
+    height: 720
+    horizontal_fov: 74.5    # deg
+    rate_hz: 10.0
+    isaac:
+      # Off as on csb today: traffic lights reach Autoware by V2X (fusion only), not this camera.
+      enabled: false
+  imu:
+    type: imu
+    calibration_key: carla/imu_link
+    link: carla/imu_link
+    frame: carla/imu_link
+    topic: /sensing/imu/carla/imu_link/imu_raw
+    mount: {x: 0.0, y: 0.0, z: 0.0, roll: 3.14159265359, pitch: 0.0, yaw: 3.14159265359}
+    isaac:
+      enabled: true
+  gnss:
+    type: gnss
+    calibration_key: carla/gnss_link
+    link: carla/gnss_link
+    frame: carla/gnss_link
+    topic: /sensing/gnss/carla/gnss_link/nav_sat_fix
+    mount: {x: -0.1, y: 0.0, z: -0.2, roll: 0.0, pitch: 0.0, yaw: 0.0}
+    rate_hz: 10.0
+    isaac:
+      enabled: true
+
+# Where each number comes from. `assumed: true` marks an estimate to replace with a
+# measurement when one exists.
+provenance:
+  geometry: {basis: "acb vehicle_info: CARLA 0.9.16 vehicle.tesla.model3 (a real Model 3 is 2.875 / 1.58 / 0.334 m); kept so Autoware, the body and the physics are one car"}
+  inertia.mass: {basis: "Model 3 Long Range AWD curb mass 1830-1851 kg by model year"}
+  inertia.com_front_fraction: {assumed: true, basis: "road-test weight splits around 47-48 % front"}
+  inertia.com_height: {assumed: true, basis: "a floor battery pack puts the CoM low"}
+  inertia.inertia_box: {assumed: true, basis: "uniform box of the body: yaw 4097 kg m^2, close to m a b = 4155"}
+  wheels.mass: {assumed: true, basis: "a wheel and tire of this size"}
+  tires: {assumed: true, basis: "dry asphalt; the PhysX vehicle's usual passenger-car tire"}
+  brakes.max_brake_torque: {basis: "chosen past the tire limit, so a stop is friction-limited (~1 g) as on a real car"}
+  powertrain.max_drive_torque: {basis: "chosen: ~8 m/s^2, beyond what Autoware asks"}
+  suspension: {assumed: true, basis: "a sedan's ride"}
+  physx: {basis: "csb roadmap 043: the braking instability fix"}
+  sensors: {basis: "acb acb_sensor_kit calibration, as csb's Isaac ego mounts it"}

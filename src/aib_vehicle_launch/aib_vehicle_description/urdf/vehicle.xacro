@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <!--
+    The Isaac ego's body for RViz: a box of vehicle_info's footprint and height, base_link
+    (the rear axle centre on the ground) at its origin. Physics, collision and the rendered
+    body are the Isaac side's (aib's rig); this only gives base_link and a shape to look at.
+  -->
+  <xacro:property name="vi" value="${xacro.load_yaml('$(find aib_vehicle_description)/config/vehicle_info.param.yaml')['/**']['ros__parameters']}"/>
+  <xacro:property name="length" value="${vi['wheel_base'] + vi['front_overhang'] + vi['rear_overhang']}"/>
+  <xacro:property name="width" value="${vi['wheel_tread'] + vi['left_overhang'] + vi['right_overhang']}"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="${(vi['wheel_base'] + vi['front_overhang'] - vi['rear_overhang']) / 2.0} ${(vi['left_overhang'] - vi['right_overhang']) / 2.0} ${vi['vehicle_height'] / 2.0}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${length} ${width} ${vi['vehicle_height']}"/>
+      </geometry>
+      <material name="aib_body">
+        <color rgba="0.10 0.45 0.85 0.6"/>
+      </material>
+    </visual>
+  </link>
+</robot>

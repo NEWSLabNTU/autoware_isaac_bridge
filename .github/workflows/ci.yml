@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    # The pure library, the generator and its staleness check: no Isaac, no ROS.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml python3-numpy python3-pytest pyflakes3
+      - name: generated files are up to date
+        run: PYTHONPATH=src/aib python3 -m aib.gen vehicles/*.yaml --check
+      - name: unit tests
+        run: python3 -m pytest -q -p no:cacheprovider src/aib/test
+      - name: lint
+        run: python3 -m pyflakes src/aib

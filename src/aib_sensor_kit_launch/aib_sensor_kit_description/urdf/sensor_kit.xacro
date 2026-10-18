@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<!-- Generated from vehicles/tesla_model3.yaml by aib.gen (`just generate`): do not edit. -->
+<robot name="aib_sensor_kit" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- The sensor kit's links, each placed from sensor_kit_calibration.yaml under
+       config_dir (Autoware's vehicle launch passes the description's config). -->
+  <xacro:arg name="config_dir" default="$(find aib_sensor_kit_description)/config"/>
+
+  <xacro:macro name="sensor_kit_macro" params="parent x y z roll pitch yaw">
+    <xacro:property name="calibration" value="${xacro.load_yaml('$(arg config_dir)/sensor_kit_calibration.yaml')}"/>
+    <joint name="sensor_kit_base_link_joint" type="fixed">
+      <origin rpy="${roll} ${pitch} ${yaw}" xyz="${x} ${y} ${z}"/>
+      <parent link="${parent}"/>
+      <child link="sensor_kit_base_link"/>
+    </joint>
+    <link name="sensor_kit_base_link"/>
+
+    <!-- top: lidar, published in top on /sensing/lidar/top/pointcloud_before_sync -->
+    <joint name="top_base_link_joint" type="fixed">
+      <origin xyz="${calibration['sensor_kit_base_link']['velodyne_top_base_link']['x']} ${calibration['sensor_kit_base_link']['velodyne_top_base_link']['y']} ${calibration['sensor_kit_base_link']['velodyne_top_base_link']['z']}"
+              rpy="${calibration['sensor_kit_base_link']['velodyne_top_base_link']['roll']} ${calibration['sensor_kit_base_link']['velodyne_top_base_link']['pitch']} ${calibration['sensor_kit_base_link']['velodyne_top_base_link']['yaw']}"/>
+      <parent link="sensor_kit_base_link"/>
+      <child link="top_base_link"/>
+    </joint>
+    <link name="top_base_link"/>
+    <joint name="top_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="top_base_link"/>
+      <child link="top"/>
+    </joint>
+    <link name="top"/>
+
+    <!-- camera6: camera, published in camera6/camera_optical_link on /sensing/camera/camera6/image_raw -->
+    <joint name="camera6_camera_link_joint" type="fixed">
+      <origin xyz="${calibration['sensor_kit_base_link']['camera6/camera_link']['x']} ${calibration['sensor_kit_base_link']['camera6/camera_link']['y']} ${calibration['sensor_kit_base_link']['camera6/camera_link']['z']}"
+              rpy="${calibration['sensor_kit_base_link']['camera6/camera_link']['roll']} ${calibration['sensor_kit_base_link']['camera6/camera_link']['pitch']} ${calibration['sensor_kit_base_link']['camera6/camera_link']['yaw']}"/>
+      <parent link="sensor_kit_base_link"/>
+      <child link="camera6/camera_link"/>
+    </joint>
+    <link name="camera6/camera_link"/>
+    <joint name="camera6_camera_optical_link_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
+      <parent link="camera6/camera_link"/>
+      <child link="camera6/camera_optical_link"/>
+    </joint>
+    <link name="camera6/camera_optical_link"/>
+
+    <!-- imu: imu, published in carla/imu_link on /sensing/imu/carla/imu_link/imu_raw -->
+    <joint name="carla_imu_link_joint" type="fixed">
+      <origin xyz="${calibration['sensor_kit_base_link']['carla/imu_link']['x']} ${calibration['sensor_kit_base_link']['carla/imu_link']['y']} ${calibration['sensor_kit_base_link']['carla/imu_link']['z']}"
+              rpy="${calibration['sensor_kit_base_link']['carla/imu_link']['roll']} ${calibration['sensor_kit_base_link']['carla/imu_link']['pitch']} ${calibration['sensor_kit_base_link']['carla/imu_link']['yaw']}"/>
+      <parent link="sensor_kit_base_link"/>
+      <child link="carla/imu_link"/>
+    </joint>
+    <link name="carla/imu_link"/>
+
+    <!-- gnss: gnss, published in carla/gnss_link on /sensing/gnss/carla/gnss_link/nav_sat_fix -->
+    <joint name="carla_gnss_link_joint" type="fixed">
+      <origin xyz="${calibration['sensor_kit_base_link']['carla/gnss_link']['x']} ${calibration['sensor_kit_base_link']['carla/gnss_link']['y']} ${calibration['sensor_kit_base_link']['carla/gnss_link']['z']}"
+              rpy="${calibration['sensor_kit_base_link']['carla/gnss_link']['roll']} ${calibration['sensor_kit_base_link']['carla/gnss_link']['pitch']} ${calibration['sensor_kit_base_link']['carla/gnss_link']['yaw']}"/>
+      <parent link="sensor_kit_base_link"/>
+      <child link="carla/gnss_link"/>
+    </joint>
+    <link name="carla/gnss_link"/>
+  </xacro:macro>
+</robot>

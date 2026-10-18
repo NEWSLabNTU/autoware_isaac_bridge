@@ -1,0 +1,15 @@
+# Generated from vehicles/tesla_model3.yaml by aib.gen (`just generate`): do not edit.
+# Autoware's vehicle_info for tesla_model3 (autoware_vehicle_info_utils::VehicleInfo).
+# Length 4.792 m, width 2.163 m, height 1.488 m.
+/**:
+  ros__parameters:
+    wheel_radius: 0.37  # ground to wheel centre
+    wheel_width: 0.235  # lateral width of the tire
+    wheel_base: 3.005  # front to rear axle centre
+    wheel_tread: 1.667  # left to right wheel centre
+    front_overhang: 0.923  # front axle to the front edge
+    rear_overhang: 0.864  # rear axle to the rear edge
+    left_overhang: 0.248  # left wheels to the left edge
+    right_overhang: 0.248  # right wheels to the right edge
+    vehicle_height: 1.488  # ground to the roof
+    max_steer_angle: 0.7  # bicycle-model tire angle limit, rad
