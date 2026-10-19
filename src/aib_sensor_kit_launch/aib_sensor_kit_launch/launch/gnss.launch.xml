@@ -6,14 +6,16 @@
     Requires map_projector_info.yaml with projector_type: TransverseMercator
   -->
 
+  <arg name="gnss_fix_name" default="gnss_link/nav_sat_fix" description="NavSatFix topic, relative to /sensing/gnss"/>
+
   <group>
     <push-ros-namespace namespace="gnss"/>
 
     <!-- GNSS Poser: NavSatFix → PoseWithCovariance converter -->
     <node pkg="autoware_gnss_poser" exec="gnss_poser" name="gnss_poser" output="screen">
       <!-- Input topics -->
-      <!-- The Isaac ego publishes to /sensing/gnss/carla/gnss_link/nav_sat_fix (the spec's topic) -->
-      <remap from="fix" to="carla/gnss_link/nav_sat_fix"/>
+      <!-- The Isaac ego publishes to /sensing/gnss/gnss_link/nav_sat_fix (the spec's topic) -->
+      <remap from="fix" to="$(var gnss_fix_name)"/>
 
       <!-- Output topics -->
       <remap from="gnss_pose" to="pose"/>

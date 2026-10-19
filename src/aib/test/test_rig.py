@@ -65,10 +65,15 @@ class SensorKitLaunchTest(unittest.TestCase):
         imu = r.sensors["imu"].topic
         self.assertTrue(imu.startswith("/sensing/imu/"))
         rel = imu[len("/sensing/imu/"):]
-        self.assertEqual(re.findall(r'name="input_topic" value="([^"]+)"', text["imu.launch.xml"]), [rel])
+        # The topics are launch arguments (Autoware's sample kit names them imu_raw_name);
+        # their defaults are the rig's, and every consumer reads the argument.
+        self.assertEqual(re.findall(r'name="imu_raw_name" default="([^"]+)"', text["imu.launch.xml"]), [rel])
+        self.assertEqual(re.findall(r'name="input_(?:topic|imu_raw)" value="([^"]+)"',
+                                    text["imu.launch.xml"]), ["$(var imu_raw_name)"] * 2)
         gnss = r.sensors["gnss"].topic
         rel = gnss[len("/sensing/gnss/"):]
-        self.assertIn(f'<remap from="fix" to="{rel}"/>', text["gnss.launch.xml"])
+        self.assertEqual(re.findall(r'name="gnss_fix_name" default="([^"]+)"', text["gnss.launch.xml"]), [rel])
+        self.assertIn('<remap from="fix" to="$(var gnss_fix_name)"/>', text["gnss.launch.xml"])
 
 
 if __name__ == "__main__":

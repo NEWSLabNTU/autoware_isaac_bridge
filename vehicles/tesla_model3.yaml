@@ -174,19 +174,19 @@ sensors:
       enabled: false
   imu:
     type: imu
-    calibration_key: carla/imu_link
-    link: carla/imu_link
-    frame: carla/imu_link
-    topic: /sensing/imu/carla/imu_link/imu_raw
+    calibration_key: imu_link
+    link: imu_link
+    frame: imu_link
+    topic: /sensing/imu/imu_link/imu_raw
     mount: {x: 0.0, y: 0.0, z: 0.0, roll: 3.14159265359, pitch: 0.0, yaw: 3.14159265359}
     isaac:
       enabled: true
   gnss:
     type: gnss
-    calibration_key: carla/gnss_link
-    link: carla/gnss_link
-    frame: carla/gnss_link
-    topic: /sensing/gnss/carla/gnss_link/nav_sat_fix
+    calibration_key: gnss_link
+    link: gnss_link
+    frame: gnss_link
+    topic: /sensing/gnss/gnss_link/nav_sat_fix
     mount: {x: -0.1, y: 0.0, z: -0.2, roll: 0.0, pitch: 0.0, yaw: 0.0}
     rate_hz: 10.0
     isaac:

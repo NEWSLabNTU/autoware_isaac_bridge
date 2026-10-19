@@ -18,7 +18,7 @@ sensor_kit_base_link:
     pitch: 0.0
     yaw: 0.0
   # imu: imu
-  carla/imu_link:
+  imu_link:
     x: 0.0
     y: 0.0
     z: 0.0
@@ -26,7 +26,7 @@ sensor_kit_base_link:
     pitch: 0.0
     yaw: 3.14159265359
   # gnss: gnss
-  carla/gnss_link:
+  gnss_link:
     x: -0.1
     y: 0.0
     z: -0.2

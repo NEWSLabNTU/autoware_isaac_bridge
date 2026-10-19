@@ -191,9 +191,11 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 | imu | from the state | Imu: orientation, angular velocity, specific force (acceleration minus gravity) in the IMU frame | every frame unless `rate_hz` |
 | gnss | from the state | NavSatFix, GBAS fix, lat/lon about the map origin (TransverseMercator at 0, 0) | `rate_hz` (10) |
 
-Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `carla/imu_link`,
-`carla/gnss_link`), so Autoware's sensing launch and csb's existing runs see what they see on
-CARLA. The camera publishes in `camera6/camera_optical_link` (acb publishes in
+Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
+`gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),
+so Autoware's sensing launch and csb's existing runs see what they see on CARLA. The IMU and
+GNSS frames were `carla/imu_link` and `carla/gnss_link` until 2026-10-19; they carry no
+simulator name now, on either bridge. The camera publishes in `camera6/camera_optical_link` (acb publishes in
 `camera6/camera_link`).
 
 ## Single source of truth

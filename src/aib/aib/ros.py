@@ -36,8 +36,8 @@ log = logging.getLogger("aib")
 MAX_CALLBACKS_PER_FRAME = 16
 DEFAULT_TOPICS = {
     "lidar": "/sensing/lidar/top/pointcloud_before_sync",
-    "imu": "/sensing/imu/carla/imu_link/imu_raw",
-    "gnss": "/sensing/gnss/carla/gnss_link/nav_sat_fix",
+    "imu": "/sensing/imu/imu_link/imu_raw",
+    "gnss": "/sensing/gnss/gnss_link/nav_sat_fix",
 }
 
 

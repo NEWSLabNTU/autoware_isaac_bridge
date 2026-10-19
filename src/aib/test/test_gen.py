@@ -86,8 +86,8 @@ class OutputTest(unittest.TestCase):
 
     def test_the_xacro_names_every_sensor_link(self):
         x = self.out["src/aib_sensor_kit_launch/aib_sensor_kit_description/urdf/sensor_kit.xacro"]
-        for link in ("top_base_link", '"top"', "camera6/camera_optical_link", "carla/imu_link",
-                     "carla/gnss_link", "velodyne_top_base_link"):
+        for link in ("top_base_link", '"top"', "camera6/camera_optical_link", "imu_link",
+                     "gnss_link", "velodyne_top_base_link"):
             self.assertIn(link, x)
 
 

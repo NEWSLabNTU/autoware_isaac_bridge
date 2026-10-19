@@ -111,17 +111,17 @@ sensors:
   imu:
     type: imu
     enabled: true
-    link: carla/imu_link
-    frame: carla/imu_link
-    topic: /sensing/imu/carla/imu_link/imu_raw
+    link: imu_link
+    frame: imu_link
+    topic: /sensing/imu/imu_link/imu_raw
     translation: [0.9, 0.0, 2.0]
     quat: [-0.007507786, 0.018194732, 0.999806208, -0.000363412]
   gnss:
     type: gnss
     enabled: true
-    link: carla/gnss_link
-    frame: carla/gnss_link
-    topic: /sensing/gnss/carla/gnss_link/nav_sat_fix
+    link: gnss_link
+    frame: gnss_link
+    topic: /sensing/gnss/gnss_link/nav_sat_fix
     translation: [0.797072306, 0.003548091, 1.801522543]
     quat: [0.999806208, -0.000363412, 0.007507786, -0.018194732]
     rate_hz: 10.0
