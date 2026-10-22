@@ -11,10 +11,21 @@ and the steering actuator (`aib.control`). The road loads (rolling resistance, a
 drag: `aib.powertrain.resistance`) are a force on the body at its centre of mass
 (PhysxForceAPI), set every step from the body's speed. Each step's wheel states (spin,
 longitudinal slip) are read back for the powertrain's ABS and traction control.
+
+Each wheel has its own tire friction table (under the vehicle, `tireFriction/<wheel>`), with no
+ground materials: its default value is the wheel's friction on whatever it stands on, the
+rig's `tire_friction` until a host writes another (`set_wheel_friction`). A host with a
+surface map (csb's surface layer, roadmap 047) writes it every substep from the wheel's
+ground (`contacts`); PhysX takes the edit on the next step. The friction-vs-slip graph is
+fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
+host's to apply through the same friction value.
 """
 import math
+from typing import NamedTuple
 
-from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_IS_ON_GROUND,
+from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
+                                        VEHICLE_WHEEL_STATE_GROUND_SHAPE,
+                                        VEHICLE_WHEEL_STATE_IS_ON_GROUND,
                                         VEHICLE_WHEEL_STATE_ROTATION_SPEED,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP)
 from omni.physx.scripts.utils import set_custom_metadata
@@ -26,13 +37,20 @@ from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams
 
 GROUPS = "/World/vehicleCollisionGroups"
-FRICTION_TABLE = "/World/vehicleTireFriction"
 WHEELS = (("frontLeft", True, 1), ("frontRight", True, -1), ("rearLeft", False, 1),
           ("rearRight", False, -1))
 
 
+class Contact(NamedTuple):
+    """Where one wheel touched the ground in the last step."""
+
+    on_ground: bool = False
+    position: tuple = (0.0, 0.0, 0.0)  # the suspension ray's hit, world frame
+    shape: str = ""  # the collider's prim path ("" when off the ground)
+
+
 def ensure_vehicle_scene(stage):
-    """The physics scene's vehicle context, the collision groups and the friction table.
+    """The physics scene's vehicle context and the collision groups.
     Call before the simulation starts: PhysX ignores the context's axes once it runs."""
     for prim in stage.Traverse():
         if prim.IsA(UsdPhysics.Scene):
@@ -47,11 +65,6 @@ def ensure_vehicle_scene(stage):
         # A vehicle's suspension raycasts do not hit its own (or any) chassis.
         chassis.CreateFilteredGroupsRel().AddTarget(query.GetPath())
         query.CreateFilteredGroupsRel().AddTarget(chassis.GetPath())
-    if not stage.GetPrimAtPath(FRICTION_TABLE):
-        table = PhysxSchema.PhysxVehicleTireFrictionTable.Define(stage, FRICTION_TABLE)
-        table.CreateGroundMaterialsRel()
-        table.CreateFrictionValuesAttr([])
-        table.CreateDefaultFrictionValueAttr(1.0)
 
 
 class Vehicle:
@@ -61,8 +74,6 @@ class Vehicle:
         self.p = p = params
         self.powertrain = powertrains.make(params)
         ensure_vehicle_scene(stage)
-        PhysxSchema.PhysxVehicleTireFrictionTable(stage.GetPrimAtPath(FRICTION_TABLE)) \
-            .GetDefaultFrictionValueAttr().Set(p.tire_friction)
         root = UsdGeom.Xform.Define(stage, path)
         prim = root.GetPrim()
         self.translate = root.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble)
@@ -110,6 +121,9 @@ class Vehicle:
         self.wheels = []
         self.wheel_paths = [f"{path}/{name}" for name, _, _ in WHEELS]
         self.wheel_states = None  # aib.powertrain.WheelState per wheel, after a step
+        self.contacts = None  # Contact per wheel, after a step
+        self.friction = []  # each wheel's table's defaultFrictionValue attribute
+        self.friction_values = [p.tire_friction] * len(WHEELS)
         for i, (name, is_front, side) in enumerate(WHEELS):
             x, y = (L if is_front else 0.0), side * half_t
             sprung, k, c = front_axle if is_front else rear_axle
@@ -133,7 +147,12 @@ class Vehicle:
             tire.CreateLongitudinalStiffnessAttr(p.long_stiff_value * G)
             tire.CreateCamberStiffnessAttr(0.0)
             tire.CreateFrictionVsSlipGraphAttr([Gf.Vec2f(*pt) for pt in p.friction_vs_slip])
-            tire.CreateFrictionTableRel().AddTarget(FRICTION_TABLE)
+            table = PhysxSchema.PhysxVehicleTireFrictionTable.Define(
+                stage, f"{path}/tireFriction/{name}")
+            table.CreateGroundMaterialsRel()
+            table.CreateFrictionValuesAttr([])
+            self.friction.append(table.CreateDefaultFrictionValueAttr(p.tire_friction))
+            tire.CreateFrictionTableRel().AddTarget(table.GetPath())
             susp = PhysxSchema.PhysxVehicleSuspensionAPI.Apply(wprim)
             susp.CreateSprungMassAttr(sprung)
             susp.CreateSpringStrengthAttr(k)
@@ -198,6 +217,7 @@ class Vehicle:
             pass
         self.last = None
         self.wheel_states = None
+        self.contacts = None
         self.road_load.Set(Gf.Vec3f(0, 0, 0))
         self.powertrain.reset()
 
@@ -221,23 +241,38 @@ class Vehicle:
             s.Set(angle)
         self.road_load.Set(Gf.Vec3f(powertrains.resistance(p, speed), 0.0, 0.0))
 
+    def set_wheel_friction(self, i, mu):
+        """Wheel `i`'s (WHEELS order) friction from the next step on; written only when it
+        changes, so a host may call it every substep."""
+        if abs(mu - self.friction_values[i]) > 1e-6:
+            self.friction[i].Set(float(mu))
+            self.friction_values[i] = mu
+
     # --- State -----------------------------------------------------------------------------
 
     def _wheel_states(self, physx):
-        """Each wheel's spin and longitudinal slip after the step (None if PhysX has none)."""
-        out = []
+        """Each wheel's spin and longitudinal slip, and where it touches the ground, after the
+        step (None, None if PhysX has none)."""
+        out, contacts = [], []
         for wp in self.wheel_paths:
             try:
                 w = physx.get_wheel_state(wp)
             except Exception:  # noqa: BLE001 - not simulated yet
-                return None
+                return None, None
             if not w:
-                return None
+                return None, None
+            on_ground = bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])
             out.append(powertrains.WheelState(
                 float(w[VEHICLE_WHEEL_STATE_ROTATION_SPEED]),
                 float(w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP]),
-                bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])))
-        return out
+                on_ground))
+            if on_ground:
+                contacts.append(Contact(
+                    True, tuple(float(c) for c in w[VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION]),
+                    str(w[VEHICLE_WHEEL_STATE_GROUND_SHAPE])))
+            else:
+                contacts.append(Contact())
+        return out, contacts
 
     def sample(self, physx, dt, state: State):
         """Read the body after one physics step; velocities by difference (base_link frame)."""
@@ -260,7 +295,7 @@ class Vehicle:
             omega = (0.0, 0.0, 0.0) if s < 1e-12 else tuple(c / s * angle / dt for c in dq[1:])
             acc = qrot(qconj(q), tuple((a - b) / dt for a, b in zip(vel_w, lv)))
         self.last = (pos, q, vel_w)
-        self.wheel_states = self._wheel_states(physx)
+        self.wheel_states, self.contacts = self._wheel_states(physx)
         state.position = pos
         state.quat = q
         state.velocity = qrot(qconj(q), vel_w)

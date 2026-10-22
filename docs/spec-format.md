@@ -40,7 +40,7 @@ footprint and height these give.
 | `inertia.com_height` | `com[2]` | above the ground |
 | `inertia.inertia_box` | `inertia_box` | the body's inertia as a uniform box of these l w h |
 | `wheels.mass`, `wheels.damping_rate` | `wheel_mass`, `wheel_damping_rate` | moment of inertia 0.5 m r^2 |
-| `tires.friction` | `tire_friction` | the friction table's default |
+| `tires.friction` | `tire_friction` | each wheel's friction table default (a host's surface layer may write another per wheel) |
 | `tires.lat_stiff_max_load`, `lat_stiff_value`, `long_stiff_value`, `friction_vs_slip` | same | PhysX's tire model: lateral stiffness graph (rest loads, N/rad per N of rest load), longitudinal stiffness per g, friction vs slip points |
 | `brakes.max_brake_torque`, `hold_brake_torque` | same | per wheel |
 | `brakes.distribution` | `brake_distribution` | `dynamic_axle_load` (ideal / EBD) or `static` |
