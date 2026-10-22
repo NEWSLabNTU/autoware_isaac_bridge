@@ -60,7 +60,8 @@ def main(argv=None):
 
     from isaacsim import SimulationApp
 
-    app = SimulationApp({"headless": not args.display})
+    # Kit uploads a crash's minidump to NVIDIA by default: kept on disk only (its dumpDir).
+    app = SimulationApp({"headless": not args.display, "extra_args": ["--/crashreporter/url="]})
 
     import omni.kit.app
     import omni.physx

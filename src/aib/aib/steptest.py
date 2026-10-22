@@ -279,7 +279,7 @@ def main(argv=None):
 
     from isaacsim import SimulationApp
 
-    app = SimulationApp({"headless": True})
+    app = SimulationApp({"headless": True, "extra_args": ["--/crashreporter/url="]})  # no crash uploads
     import omni.physx
     import omni.usd
     from isaacsim.core.api import World
