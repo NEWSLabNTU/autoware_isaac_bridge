@@ -21,7 +21,7 @@ file and checked against it.
 | `src/aib_individual_params/` | The kit's calibration as `individual_params` would hold it (named so it can share a workspace with acb's `individual_params`) |
 | `src/aib_launch/` | `isaac_simulator.launch.xml`: Autoware for the Isaac ego |
 
-### How it relates to acb and csb
+### How it relates to acb and swb
 
 - **acb** is the same thing on CARLA: CARLA owns the car, acb_bridge (Rust) publishes its
   sensors and status and applies Autoware's control. aib is the Isaac side's equivalent. It
@@ -29,22 +29,22 @@ file and checked against it.
   includes acb's `carla_simulator.launch.xml` with aib's vehicle and sensor models and no
   vehicle interface, and the vehicle agent is acb's `acb_pilot`. Topic names and frames are
   acb's, so the same Autoware pipeline consumes them.
-- **[carla-scenario-bridge](https://github.com/NEWSLabNTU/carla-scenario-bridge)** (csb) runs
-  scenario_simulator_v2 scenarios on CARLA or Isaac Sim. Its Isaac backend is a lockstep
-  world server (the world, the NPCs, csb's world protocol); the ego inside it is this
-  library. (Today csb carries its own copy in `src/csb_isaac`; moving it onto aib is csb's
-  roadmap 045.)
+- **[scenario-world-bridge](https://github.com/NEWSLabNTU/scenario-world-bridge)** (swb,
+  carla-scenario-bridge or csb until its roadmap 046) runs scenario_simulator_v2 scenarios
+  on CARLA or Isaac Sim. Each simulator is a world server behind swb's world protocol; its
+  Isaac world server (`src/isaac_world`) is a lockstep world (the world, the NPCs) whose ego
+  is this library (swb roadmap 045).
 - Unlike acb, the bridge cannot be a separate ROS node: the sensors render in the process
   that steps the world, and that process runs Isaac Sim's own Python (3.12, its bundled
-  rclpy). So the library is imported by the host that owns the world -- csb's world server,
-  or `aib.runner`.
+  rclpy). So the library is imported by the host that owns the world -- swb's Isaac world
+  server, or `aib.runner`.
 
 ## Quick start
 
 Prerequisites: Ubuntu 22.04, ROS 2 Humble, Autoware 1.5.0 (`/opt/autoware/1.5.0`), Isaac Sim
 6.1 installed with pip into a venv (`ISAAC_ROOT`, default `/mnt/disk1/isaac-sim`), and acb's
 ROS packages for the Autoware side (`ACB_SETUP=<acb>/install/setup.bash`, or a workspace that
-builds both, as csb's does).
+builds both, as swb's does).
 
 ```bash
 just setup      # once: Autoware's messages rebuilt for Isaac's Python
@@ -83,7 +83,7 @@ one makes `check-generated` fail.
 - The pure library, the generator and the Autoware packages are tested here (`just test`;
   `play_launch dump` of `isaac_simulator.launch.xml` resolves the same 205 nodes as acb's
   `carla_simulator.launch.xml` without its bridge).
-- The Isaac code (`aib.isaac`, `aib.runner`) is csb_isaac's ego, which drives csb's Isaac
+- The Isaac code (`aib.isaac`, `aib.runner`) is csb_isaac's ego (swb's `isaac_world` now), which drives swb's Isaac
   exit runs, restructured. The camera is new
   and untested on Isaac (off in the shipped rig, as on csb).
 - Powertrain: `ev`, the default (the Model 3 RWD drive unit: motor envelope and lag, regen

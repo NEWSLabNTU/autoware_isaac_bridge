@@ -5,7 +5,7 @@
   Included by Autoware's tier4_vehicle_launch when vehicle_model:=aib_vehicle and
   launch_vehicle_interface:=true. On Isaac the vehicle interface (/vehicle/status/*,
   /control/command/*) lives in the process that steps the world -- aib's runner or
-  carla-scenario-bridge's world server, both in Isaac Sim's own Python -- not in a ROS node
+  scenario-world-bridge's Isaac world server, both in Isaac Sim's own Python -- not in a ROS node
   this launch could start. isaac_simulator.launch.xml passes launch_vehicle_interface:=false.
 -->
 <launch>

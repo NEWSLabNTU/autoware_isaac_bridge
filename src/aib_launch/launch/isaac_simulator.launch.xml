@@ -4,7 +4,7 @@
      The Autoware side of an aib ego: acb's carla_simulator.launch.xml (Autoware 1.5.0 with
      acb's simulation-tuned localization, perception, control and system configuration, the
      acb_pilot vehicle agent) with aib's vehicle and sensor kit, and no vehicle interface of
-     its own: the Isaac side (aib's runner, or carla-scenario-bridge's world server) publishes
+     its own: the Isaac side (aib's runner, or scenario-world-bridge's Isaac world server) publishes
      /vehicle/status/*, /clock and the sensors on this domain and takes /control/command/*.
 
        ROS_DOMAIN_ID=1 play_launch launch aib_launch isaac_simulator.launch.xml \
@@ -19,7 +19,7 @@
      Why include rather than copy: the 400-line file is acb's tuning of Autoware for a
      simulated car, and Isaac needs the same; a copy would drift. aib owns only what differs,
      the vehicle and sensor models. Needs acb's ROS packages (acb_launch, acb_pilot) in the
-     environment: carla-scenario-bridge builds both; standalone, source an acb install.
+     environment: scenario-world-bridge builds both; standalone, source an acb install.
 -->
 <launch>
   <arg name="map_path" description="point cloud and lanelet2 map directory path"/>

@@ -26,7 +26,7 @@ autoware:
 
 body:
   # The visual body a host may put on the vehicle: a CARLA blueprint id in csb's vehicle
-  # catalogue (CSB_VEHICLE_USD). Without a catalogue the chassis is the box below.
+  # catalogue (SWB_VEHICLE_USD, CSB_VEHICLE_USD before swb roadmap 046). Without a catalogue the chassis is the box below.
   catalogue_model: vehicle.tesla.model3
 
 # What Autoware plans with (vehicle_info), and the PhysX wheel layout. base_link is the rear
