@@ -13,6 +13,7 @@ continuous between episodes instead of starting at spawn.
 | the rig's camera topics (when enabled) | Image, CameraInfo | the sensor's |
 | `/vehicle/status/{velocity,steering,gear,control_mode,turn_indicators,hazard_lights}_status` | Autoware | `base_link` |
 | `/clock` | Clock | |
+| `/perception/traffic_light_recognition/external/traffic_signals` (when the host has signals) | TrafficLightGroupArray | |
 
 Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_cmd}` and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
@@ -82,6 +83,7 @@ class EgoRos:
             "hazard": n.create_publisher(HazardLightsReport, "/vehicle/status/hazard_lights_status", reliable),
         }
         self._sensor_pubs = {}  # topic -> publisher, shared by egos of the same rig
+        self._signals_pub = None  # made on the first signals (aib.signals)
         if rig is not None:
             for s in rig.sensors.values():
                 if s.enabled:
@@ -198,6 +200,30 @@ class EgoRos:
         hz.stamp = stamp
         hz.report = self.hazard
         pub["hazard"].publish(hz)
+
+    def publish_signals(self, groups, stamp):
+        """Autoware's V2X traffic signals (`aib.signals`): `groups`, `[(regulatory element id,
+        colour name)]` as the host holds them, at `stamp`."""
+        from autoware_perception_msgs.msg import (TrafficLightElement, TrafficLightGroup,
+                                                  TrafficLightGroupArray)
+        from rclpy.qos import QoSProfile, ReliabilityPolicy
+
+        from . import signals
+
+        if self._signals_pub is None:
+            # acb's publisher's QoS (rclrs' default): reliable, depth 10.
+            self._signals_pub = self.node.create_publisher(
+                TrafficLightGroupArray, signals.TOPIC,
+                QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE))
+        msg = TrafficLightGroupArray()
+        msg.stamp = stamp
+        for reg, colour in groups:
+            color, shape, status, confidence = signals.element(colour)
+            msg.traffic_light_groups.append(TrafficLightGroup(
+                traffic_light_group_id=int(reg),
+                elements=[TrafficLightElement(color=color, shape=shape, status=status,
+                                              confidence=confidence)]))
+        self._signals_pub.publish(msg)
 
     def close(self):
         import rclpy

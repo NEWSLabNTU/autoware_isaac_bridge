@@ -40,7 +40,8 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.frames` | - | quaternions, URDF rpy, transforms, lat/lon about the map origin |
 | `aib.sensing` | numpy | IMU and GNSS readings from the state, the PointCloud2 layout, periodic timers |
 | `aib.rig` | yaml | `Rig`, `SensorRig`, `EgoConfig` |
-| `aib.ros` | Isaac's rclpy + Autoware msgs | `EgoRos`: the vehicle interface and the sensor publishers on one domain |
+| `aib.ros` | Isaac's rclpy + Autoware msgs | `EgoRos`: the vehicle interface, the sensor publishers and the host's traffic signals on one domain |
+| `aib.signals` | - | a signal colour as Autoware's `TrafficLightElement` (V2X input, as acb's publisher) |
 | `aib.isaac.vehicle` | Isaac | the PhysX vehicle ("drive none"): build, apply, sample, teleport |
 | `aib.isaac.sensors` | Isaac | RTX lidar, RGB camera, IMU, GNSS |
 | `aib.isaac.ego` | Isaac | `Ego`: one vehicle with its sensors and ROS side |
@@ -220,4 +221,6 @@ What is not generated, and why:
 `aib.runner` (`just isaac-ego`) is the smallest host: Isaac Sim, a world (a USD stage with
 its own colliders, or a ground plane), one ego at a pose, fixed frames forever. It is what
 acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs,
-no traffic lights, no scenario protocol: those are csb's.
+no traffic lights, no scenario protocol: those are csb's. (A host that has signals hands
+them to `EgoRos.publish_signals` each frame, which publishes them to Autoware as acb does;
+csb's world server does, roadmap 044.)
