@@ -12,13 +12,16 @@ drag: `aib.powertrain.resistance`) are a force on the body at its centre of mass
 (PhysxForceAPI), set every step from the body's speed. Each step's wheel states (spin,
 longitudinal slip) are read back for the powertrain's ABS and traction control.
 
-Each wheel has its own tire friction table (under the vehicle, `tireFriction/<wheel>`), with no
-ground materials: its default value is the wheel's friction on whatever it stands on, the
+Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
+no ground materials: its default value is the wheel's friction on whatever it stands on, the
 rig's `tire_friction` until a host writes another (`set_wheel_friction`). A host with a
 surface map (csb's surface layer, roadmap 047) writes it every substep from the wheel's
 ground (`contacts`); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
-host's to apply through the same friction value.
+host's to apply through the same friction value. The tables live outside the vehicle and stay
+when it goes: PhysX refuses to remove a tire friction table while the simulation plays
+("removing tire friction tables while playing is not permitted"), so one under the vehicle
+failed at every despawn; a vehicle spawned again at the same path takes its tables back.
 """
 import math
 from typing import NamedTuple
@@ -37,6 +40,7 @@ from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams
 
 GROUPS = "/World/vehicleCollisionGroups"
+TIRE_FRICTION = "/World/vehicleTireFriction"
 WHEELS = (("frontLeft", True, 1), ("frontRight", True, -1), ("rearLeft", False, 1),
           ("rearRight", False, -1))
 
@@ -148,7 +152,7 @@ class Vehicle:
             tire.CreateCamberStiffnessAttr(0.0)
             tire.CreateFrictionVsSlipGraphAttr([Gf.Vec2f(*pt) for pt in p.friction_vs_slip])
             table = PhysxSchema.PhysxVehicleTireFrictionTable.Define(
-                stage, f"{path}/tireFriction/{name}")
+                stage, f"{TIRE_FRICTION}/{path.strip('/').replace('/', '_')}/{name}")
             table.CreateGroundMaterialsRel()
             table.CreateFrictionValuesAttr([])
             self.friction.append(table.CreateDefaultFrictionValueAttr(p.tire_friction))
