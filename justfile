@@ -149,6 +149,8 @@ autoware *args:
     source "{{autoware_setup}}"
     if [ -n "$dds_uri" ]; then export CYCLONEDDS_URI="$dds_uri"; fi
     source "{{project}}/install/setup.bash"
+    # Arguments roadmap 051 renamed are refused by name (ROS launch would drop them).
+    "{{project}}/install/autoware_sim_profile/lib/autoware_sim_profile/check_launch_args" "$@" || exit 2
     export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
     exec play_launch launch --web-addr 0.0.0.0:${AIB_WEB_PORT:-8086} --log-dir play_log/ego \
         aib_launch isaac_simulator.launch.xml "$@"

@@ -2,8 +2,7 @@
 
 `VehicleParams` is the flat form the Isaac side consumes. It is written into a rig file by
 the generator from a vehicle spec (`aib.gen.vehicle_params`), and a host may override any
-field by name afterwards (an ego config's `vehicle:` mapping). Field names are those of
-carla-scenario-bridge's `csb_isaac.vehicle_params`, so overrides written for it still apply.
+field by name afterwards (an ego config's `vehicle:` mapping).
 
 Defaults are the shipped spec's (sim_vehicle_spec's vehicles/tesla_model3.yaml) so a bare
 `VehicleParams()` is the same car; the spec, not these defaults, is the source of truth.
