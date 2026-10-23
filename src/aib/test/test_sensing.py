@@ -54,7 +54,7 @@ class ImuTest(unittest.TestCase):
         self.assertTrue(close(gyro, (0.0, 0.0, 0.0)))
 
     def test_a_flipped_mount_flips_the_reading(self):
-        # csb's (CARLA's) IMU mount: roll pi, yaw pi
+        # swb's (CARLA's) IMU mount: roll pi, yaw pi
         q_bi = frames.rpy_quat(math.pi, 0.0, math.pi)
         s = State(acceleration=(1.0, 0.0, 0.0), angular_velocity=(0.0, 0.0, 0.2))
         _, gyro, acc = imu_reading(s, q_bi)

@@ -9,9 +9,9 @@ deps/sim_vehicle_spec/vehicles/<name>.yaml ──aib.gen──> src/aib/config/<
 
 Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (aib.isaac) in the
    aib_launch isaac_simulator.launch.xml   ── /control/command/* ──>   process stepping the world:
-   = acb's carla_simulator.launch.xml                                    csb's world server, or
-     + tesla_model3, its sensor kit                                      aib.runner
-     - vehicle interface
+   = autoware_sim_profile's                                              swb_isaac_world, or
+     autoware.launch.xml, nothing added                                  aib.runner
+     (tesla_model3, its sensor kit)
 ```
 
 - **The spec** is the vehicle: one YAML per vehicle, sim_vehicle_spec's (roadmap 051 of
@@ -23,16 +23,17 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 - **The rig** (`<name>.rig.yaml`) is the spec flattened for the Isaac side: `VehicleParams`
   (one flat field per physics number), the chassis box, each sensor with its base_link
   transform resolved. A host never reads Autoware's files to build the ego.
-- **The ego config** (`config/ego.yaml`) is a run of a rig: the ROS domain, the clock
-  offset, and hand overrides of vehicle fields and sensor options (`enabled`, `topic`,
-  `frame`, `rate_hz`, `isaac`), applied last. csb's `acb_ego.yaml` held all of this plus
-  the vehicle; the vehicle moved to the spec.
+- **The ego config** (`config/ego.yaml`) is a run of a rig: the ROS domain, the node name,
+  and hand overrides of vehicle fields and sensor options (`enabled`, `topic`, `frame`,
+  `rate_hz`, `isaac`), applied last. It has no clock setting: `clock_offset` went with
+  roadmap 051, and a config naming it, or any other unknown key, is refused at load.
 
 ## Library layout
 
 | module | needs | what |
 |---|---|---|
-| `aib.gen` | yaml, sim_vehicle_spec | the rig from a spec (VehicleParams from the spec, the box, sensors in base_link, camera K) and its `--check` |
+| `aib.gen` | yaml, sim_vehicle_spec | the rig from a spec (VehicleParams from the spec's `isaac.physx` and physics, the box, sensors in base_link, camera K, the `spec_hash`) and its `--check` |
+| `aib.sim_time` | - | `BASE_NS`, `nanos`, `sim_ns`: the ROS time of a simulation time |
 | `aib.params` | - | `VehicleParams`; axle loads, brake split, suspension rates, inertia; geometry check |
 | `aib.control` | - | `Command`, `State`, gears, the steering actuator, Ackermann |
 | `aib.powertrain` | - | the powertrain seam; `ideal` |
@@ -44,7 +45,8 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.isaac.vehicle` | Isaac | the PhysX vehicle ("drive none"): build, apply, sample, teleport |
 | `aib.isaac.sensors` | Isaac | RTX lidar, RGB camera, IMU, GNSS |
 | `aib.isaac.ego` | Isaac | `Ego`: one vehicle with its sensors and ROS side |
-| `aib.runner` | Isaac | one ego in a world, no csb |
+| `aib.runner` | Isaac | one ego in a world, no swb, no SSv2 |
+| `aib.steptest` | Isaac | open-loop step tests of the PhysX vehicle and powertrain, no ROS |
 
 The pure modules are what the unit tests cover, under the system Python (3.10) and Isaac's
 (3.12) alike.
@@ -64,14 +66,20 @@ stamp = ros.publish_clock(t_end)    # once per frame, by the host
 ego.publish(t_end, stamp)           # vehicle status, IMU, GNSS (at its rate), lidar (one frame late)
 ```
 
-Lockstep, as acb follows CARLA's ticks. Two choices kept from csb (roadmap 038), with why:
+Lockstep, as acb follows CARLA's ticks. Two choices, with why (scenario-world-bridge
+roadmaps 038 and 051):
 
-- **`/clock`**: stamps are sim time plus BASE_NS (`aib.sim_time`, 1000 s), the integer every
-  part of a run computes from the same time (scenario-world-bridge roadmap 051). A restarted
-  simulator starts time again; a long-lived Autoware stack would clear its TF buffers and EKF
-  for good, so it ends instead (autoware_sim_profile's clock_guard) and comes back on the new
-  episode. (Until 051 a wall-clock offset hid the restart, and Isaac's time and SSv2's differed
-  by it.)
+- **`/clock`**: stamps are `sim_ns(t) = nanos(t) + BASE_NS` (`aib.sim_time`: `BASE_NS` is
+  1000 s, `nanos` rounds half away from zero as Rust's `f64::round` does), the integer every
+  part of a run computes from the same time, the world protocol's `sim_time_ns` among them.
+  `BASE_NS` keeps ROS time clear of 0 ("no clock yet") and of the small values for which
+  `now() - duration` goes negative. Time is monotonic within an episode only. A restarted
+  runner or world server starts it again; a long-lived Autoware stack would clear its TF
+  buffers and EKF for good, so it ends instead (autoware_sim_profile's `clock_guard`) and
+  comes back on the new episode. swb_isaac_world keeps its time running over its lifetime
+  (a world load starts a new `episode_id` but not a new time), so on Isaac a world load does
+  not end the stack; on CARLA it does. (Until 051 a wall-clock offset, `clock_offset: wall`,
+  hid a restart, and Isaac's time and SSv2's differed by it.)
 - **The lidar one frame late**: a scan sent with its own frame's `/clock` races the EKF pose
   of that stamp to NDT, which then cannot interpolate and flaps MRM.
 
@@ -88,7 +96,8 @@ is placed so that the sagged wheel centre is at `z = r`. The chassis collider is
 lifted clear of the ground so only the wheels touch it.
 
 The physics numbers, their sources and which are assumptions are in the spec; the first
-spec is csb's "plausible real Model 3" (csb roadmap 043, "As built: vehicle").
+spec is the "plausible real Model 3" of scenario-world-bridge roadmap 043 ("As built:
+vehicle").
 
 ## Powertrain
 
@@ -157,7 +166,7 @@ from published data, with their sources and which are estimates in the spec's pr
 
 `just isaac-steptest` (`aib.steptest`) builds the rig's vehicle in Isaac on a flat ground
 plane, no ROS, and runs open-loop tests (0-100 km/h, 100-0 braking, regen at 60 km/h,
-acceleration and braking steps, csb 043's step-response sequences), writing a CSV per test
+acceleration and braking steps, scenario-world-bridge roadmap 043's step-response sequences), writing a CSV per test
 and `summary.json` (`set:=field=value` overrides, repeatable). The shipped spec, measured
 2026-10-19 (flat ground, friction 1.0; "flat" is the earlier flat grip curve, "realistic"
 the spec's grip falling to 0.8 at lock):
@@ -179,8 +188,8 @@ the car steerable). The 0-100 time is 0.35 s over Tesla's: 0.27 s is the hold br
 (dead time and lag, the start is from a hold), the rest the PhysX tire's slip at launch
 (0.16; a twice as stiff tire gives 6.31 s).
 
-Closed loop: `just isaac-ego` on Town01 (the SimReady world) with `just autoware` and acb's
-pilot driving town01_ego_drive's route (190.8, -130.1) to (120.0, -129.8): arrived; median
+Closed loop: `just isaac-ego` on Town01 (the SimReady world) with `just autoware` and the
+pilot (then acb's, now autoware_sim_pilot's `auto_drive`) driving town01_ego_drive's route (190.8, -130.1) to (120.0, -129.8): arrived; median
 |commanded - delivered| acceleration 0.018 m/s^2 for `ev` (459 samples), 0.016 for `ideal`,
 against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 
@@ -196,7 +205,7 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),
-so Autoware's sensing launch and csb's existing runs see what they see on CARLA. The IMU and
+so Autoware's sensing launch and swb's runs see what they see on CARLA. The IMU and
 GNSS frames were `carla/imu_link` and `carla/gnss_link` until 2026-10-19; they carry no
 simulator name now, on either bridge. The camera publishes in `camera6/camera_optical_link` (acb publishes in
 `camera6/camera_link`).
@@ -211,11 +220,17 @@ the spec gives. `test_gen.AgreesWithAutowareTest` checks the rig against Autowar
 for the same car (autoware_sim_vehicle): the same spec_hash, geometry and box, and every
 sensor at the same transform.
 
+`just vehicle-check` checks the running car against Autoware's side without SSv2 or
+Autoware: the runner on a ground plane, headless, then autoware_sim_vehicle's
+`vehicle_check` (`autoware_sim_check`): the contract (topics, types, rates, frames, stamps,
+`/robot_description`) and the dynamics run (acceleration and brake steps against 0.35 m/s^2,
+a steering sweep against the bicycle model). PASS or FAIL, with `report.json`.
+
 ## Standalone runner
 
 `aib.runner` (`just isaac-ego`) is the smallest host: Isaac Sim, a world (a USD stage with
 its own colliders, or a ground plane), one ego at a pose, fixed frames forever. It is what
 acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs,
-no traffic lights, no scenario protocol: those are csb's. (A host that has signals hands
-them to `EgoRos.publish_signals` each frame, which publishes them to Autoware as acb does;
-csb's world server does, roadmap 044.)
+no traffic lights, no scenario protocol: those are swb_isaac_world's. (A host that has
+signals hands them to `EgoRos.publish_signals` each frame, which publishes them to Autoware
+as acb does; swb_isaac_world does, scenario-world-bridge roadmap 044.)

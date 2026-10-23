@@ -1,4 +1,4 @@
-"""aib's standalone runner: one ego in an Isaac world, no csb, no SSv2.
+"""aib's standalone runner: one ego in an Isaac world, no swb, no SSv2.
 
     python -m aib.runner --ego config/ego.yaml [--world <usd>] [--pose x,y,z,yaw]
         [--frame-rate 20] [--physics-dt 0.016667] [--display :8] [--realtime] [--duration s]
@@ -8,7 +8,7 @@ Sim (headless unless `--display`), loads the world (a USD stage with its own col
 world: a flat ground plane), puts the ego at `--pose` (map frame, base_link on the ground,
 yaw in rad) and steps the world in fixed frames forever (or `--duration` s of sim time),
 publishing `/clock`, the vehicle status and the sensors on the ego's domain and applying
-Autoware's commands -- what csb's world server does for its ego, without a scenario.
+Autoware's commands -- what swb's world server does for its ego, without a scenario.
 Autoware on the same domain: `just autoware` (aib_launch isaac_simulator.launch.xml).
 
 `--realtime` paces frames to the wall clock; without it the world runs as fast as it can,
@@ -92,7 +92,7 @@ def main(argv=None):
     ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name)
     # The chassis box is the collider, not a body: the roof lidar sees it (11400 points of
     # the ego itself in Autoware's obstacle cloud, which then stops for "route-obstacle"), so
-    # hide it from rendering as csb does when it puts a catalogue body on the ego.
+    # hide it from rendering as swb does when it puts a catalogue body on the ego.
     from pxr import UsdGeom
 
     UsdGeom.Imageable(stage.GetPrimAtPath(ego.vehicle.body_path)).MakeInvisible()

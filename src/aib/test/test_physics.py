@@ -1,5 +1,5 @@
 """Vehicle parameters, the powertrain seam and the steering: the maths the PhysX vehicle
-applies every substep. Pure. Ported from csb's test_vehicle_params.py where it applies."""
+applies every substep. Pure. Ported from swb's test_vehicle_params.py where it applies."""
 import math
 import unittest
 

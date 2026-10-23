@@ -2,8 +2,9 @@
 
 Its own rclpy context on the ego's domain (an explicit `domain_id`, so one process can serve
 several domains), one node. Made once per process and kept across egos: a new DDS
-participant among some 200 Autoware ones takes seconds to be discovered, and `/clock` stays
-continuous between episodes instead of starting at spawn.
+participant among some 200 Autoware ones takes seconds to be discovered. `/clock` is the
+host's simulation time plus `BASE_NS` (`aib.sim_time`); it is monotonic only within an
+episode, and the Autoware profile's `clock_guard` ends the stack if it ever goes back.
 
 | topic | type | frame |
 |---|---|---|
@@ -23,7 +24,7 @@ integer every part of a run computes from the same time, clear of zero, where Au
 misbehaves. Time is monotonic within an episode only; a stack that sees `/clock` go back (a
 restarted runner or world server) ends (autoware_sim_profile's clock_guard) and comes back on
 the new episode, rather than living on with cleared TF buffers and an EKF that never drives
-again (csb roadmap 038).
+again (swb roadmap 038).
 
 Runs inside Isaac Sim's Python (3.12, its bundled rclpy) with Autoware's message packages
 rebuilt for it (scripts/build_msgs.sh); nothing here is imported by the pure modules.

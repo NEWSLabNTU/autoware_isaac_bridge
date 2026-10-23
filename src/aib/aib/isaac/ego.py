@@ -2,7 +2,7 @@
 `SimulationApp`.
 
 What acb_bridge is to a CARLA vehicle, this is to an Isaac one, in the process that steps
-the world (the sensors render there). A host -- csb's lockstep world server, or aib's own
+the world (the sensors render there). A host -- swb's lockstep world server, or aib's own
 runner (`aib.runner`) -- owns the stage and the clock and calls, every frame:
 
     ego.take_commands()                    # Autoware's commands that arrived

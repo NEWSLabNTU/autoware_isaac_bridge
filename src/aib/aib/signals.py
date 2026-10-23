@@ -1,6 +1,6 @@
-"""Traffic signals as Autoware's V2X input (carla-scenario-bridge roadmap 044).
+"""Traffic signals as Autoware's V2X input (scenario-world-bridge roadmap 044).
 
-The host (csb's world server) holds each signal's colour, as SSv2 commands it; `EgoRos`
+The host (swb's world server) holds each signal's colour, as SSv2 commands it; `EgoRos`
 publishes them on `/perception/traffic_light_recognition/external/traffic_signals`, the
 input `traffic_light_arbiter` takes beside its own recognition, as acb does on CARLA: one
 `TrafficLightGroup` per Lanelet2 regulatory element, one solid circle at confidence 1 (the

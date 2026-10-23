@@ -14,7 +14,7 @@ CSV of every frame goes to DIR, and a summary of the measurements to DIR/summary
 - `regen_60`:  60 km/h, then -1.5 m/s^2 (all regen) and -4 m/s^2 (regen + friction)
 - `coast`:     100 km/h, then neutral: the road load's deceleration against the model's
 - `steps`:     at 10 m/s, +1.5 m/s^2 then -3 m/s^2 steps: the response's dead time and lag
-- `accel_brake`, `hard_brake`, `limit_brake`: csb's step-response sequences (roadmap 043)
+- `accel_brake`, `hard_brake`, `limit_brake`: swb's step-response sequences (roadmap 043)
 """
 import argparse
 import csv

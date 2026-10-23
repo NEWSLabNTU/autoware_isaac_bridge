@@ -92,7 +92,7 @@ class Rig:
 
 @dataclass
 class EgoConfig:
-    """A run of a rig: what csb's `acb_ego.yaml` held, minus the vehicle itself."""
+    """A run of a rig: what swb's `acb_ego.yaml` held, minus the vehicle itself."""
 
     rig: str = ""  # path, relative to this file
     domain: int = 1
