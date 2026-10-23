@@ -39,9 +39,16 @@ class RigTest(unittest.TestCase):
         cfg = EgoConfig.load(EGO)
         self.assertEqual(Path(cfg.rig), RIG)
         self.assertEqual(cfg.domain, 1)
-        self.assertEqual(cfg.clock_offset, "wall")
         self.assertEqual(cfg.vehicle, {})
         self.assertEqual(cfg.load_rig().name, "tesla_model3")
+
+    def test_clock_offset_is_refused_by_name(self):
+        # Roadmap 051: stamps are sim time + BASE_NS; the key is gone, not ignored.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "e.yaml"
+            p.write_text(f"rig: {RIG}\nclock_offset: wall\n")
+            with self.assertRaisesRegex(ValueError, "clock_offset is gone"):
+                EgoConfig.load(p)
 
     def test_an_ego_config_needs_a_rig_and_known_keys(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -96,7 +96,6 @@ class EgoConfig:
 
     rig: str = ""  # path, relative to this file
     domain: int = 1
-    clock_offset: object = "wall"  # s, or "wall": the wall clock when the process starts
     node_name: str = "isaac_vehicle"
     vehicle: dict = field(default_factory=dict)  # VehicleParams overrides, by field name
     sensors: dict = field(default_factory=dict)  # sensor name -> overrides (SENSOR_OVERRIDES)
@@ -107,6 +106,10 @@ class EgoConfig:
 
         path = Path(path)
         doc = yaml.safe_load(path.read_text()) or {}
+        if "clock_offset" in doc:
+            raise ValueError(f"{path}: clock_offset is gone (scenario-world-bridge roadmap 051): "
+                             "the ego stamps sim time + BASE_NS, and a stack that sees time go "
+                             "back ends; remove the key")
         unknown = set(doc) - {f.name for f in fields(cls)}
         if unknown:
             raise ValueError(f"{path}: unknown key(s) {sorted(unknown)}")

@@ -1,13 +1,11 @@
-# An ego run (aib.rig.EgoConfig): which vehicle, on which ROS domain, with which clock.
+# An ego run (aib.rig.EgoConfig): which vehicle, on which ROS domain, as which node. Stamps are
+# Isaac's sim time + BASE_NS (aib.sim_time); there is no clock setting.
 # The vehicle itself is the rig, generated from its spec
 # (deps/sim_vehicle_spec/vehicles/<name>.yaml): edit the
 # spec and `just generate`, not the rig. Paths are relative to this file.
 rig: tesla_model3.rig.yaml
 # The ego's ROS domain: Autoware runs there (`just autoware`, `ROS_DOMAIN_ID`).
 domain: 1
-# Added to Isaac's sim time on every stamp and on /clock, s; "wall": the wall clock when the
-# process starts, so a restarted simulator never sends the ego stack's time backwards.
-clock_offset: wall
 node_name: isaac_vehicle
 # Hand overrides, applied last (for experiments; a lasting change belongs in the spec).
 # Any VehicleParams field by name (aib/params.py), e.g. `mass: 1900.0`, `tire_friction: 0.7`.

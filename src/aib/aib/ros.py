@@ -18,17 +18,17 @@ continuous between episodes instead of starting at spawn.
 Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_cmd}` and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
 
-Stamps are sim time plus an offset fixed when this is made: by default (`clock_offset:
-wall`) the wall clock then, so the ego's time never goes backwards across restarts -- a
-long-lived Autoware stack that sees `/clock` jump back clears its TF buffers and its EKF and
-never drives again (csb roadmap 038). It also keeps the clock clear of zero, where Autoware
-misbehaves.
+Stamps are sim time plus BASE_NS (aib.sim_time; scenario-world-bridge roadmap 051): the
+integer every part of a run computes from the same time, clear of zero, where Autoware
+misbehaves. Time is monotonic within an episode only; a stack that sees `/clock` go back (a
+restarted runner or world server) ends (autoware_sim_profile's clock_guard) and comes back on
+the new episode, rather than living on with cleared TF buffers and an EKF that never drives
+again (csb roadmap 038).
 
 Runs inside Isaac Sim's Python (3.12, its bundled rclpy) with Autoware's message packages
 rebuilt for it (scripts/build_msgs.sh); nothing here is imported by the pure modules.
 """
 import logging
-import time
 
 from .control import Command, gear_from_command
 
@@ -43,7 +43,7 @@ DEFAULT_TOPICS = {
 
 
 class EgoRos:
-    def __init__(self, domain=1, clock_offset="wall", rig=None, node_name="isaac_vehicle"):
+    def __init__(self, domain=1, rig=None, node_name="isaac_vehicle"):
         import rclpy
         from autoware_control_msgs.msg import Control
         from autoware_vehicle_msgs.msg import (ControlModeReport, GearCommand, GearReport,
@@ -88,10 +88,6 @@ class EgoRos:
             for s in rig.sensors.values():
                 if s.enabled:
                     self.sensor_publisher(s)
-        if clock_offset == "wall":
-            self.clock_offset = float(int(time.time()))
-        else:
-            self.clock_offset = float(clock_offset)
         self.reset()
 
         def on_control(msg):
@@ -127,7 +123,7 @@ class EgoRos:
 
     @classmethod
     def from_config(cls, cfg, rig=None):
-        return cls(domain=cfg.domain, clock_offset=cfg.clock_offset, rig=rig,
+        return cls(domain=cfg.domain, rig=rig,
                    node_name=cfg.node_name)
 
     def sensor_publisher(self, s):
@@ -152,8 +148,8 @@ class EgoRos:
         self.hazard = 1  # HazardLightsReport.DISABLE
 
     def publish_clock(self, sim_time):
-        """`/clock` at `sim_time` (+ the offset); returns that stamp."""
-        stamp = self.stamp(sim_time + self.clock_offset)
+        """`/clock` at `sim_time` (s); returns that stamp."""
+        stamp = self.stamp(sim_time)
         self.pub["clock"].publish(self.m["Clock"](clock=stamp))
         return stamp
 
@@ -164,10 +160,13 @@ class EgoRos:
             self.executor.spin_once(timeout_sec=0)
 
     @staticmethod
-    def stamp(t):
+    def stamp(sim_time):
+        """The ROS time of `sim_time` s: nanos(sim_time) + BASE_NS."""
         from builtin_interfaces.msg import Time
 
-        ns = int(round(t * 1e9))
+        from .sim_time import sim_ns
+
+        ns = sim_ns(sim_time)
         return Time(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000)
 
     def publish_status(self, state, stamp):

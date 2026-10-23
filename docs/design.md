@@ -66,9 +66,12 @@ ego.publish(t_end, stamp)           # vehicle status, IMU, GNSS (at its rate), l
 
 Lockstep, as acb follows CARLA's ticks. Two choices kept from csb (roadmap 038), with why:
 
-- **`/clock` offset**: stamps are sim time plus the wall clock at process start, so a
-  restarted simulator never sends a long-lived Autoware stack's time backwards (which clears
-  its TF buffers and EKF for good).
+- **`/clock`**: stamps are sim time plus BASE_NS (`aib.sim_time`, 1000 s), the integer every
+  part of a run computes from the same time (scenario-world-bridge roadmap 051). A restarted
+  simulator starts time again; a long-lived Autoware stack would clear its TF buffers and EKF
+  for good, so it ends instead (autoware_sim_profile's clock_guard) and comes back on the new
+  episode. (Until 051 a wall-clock offset hid the restart, and Isaac's time and SSv2's differed
+  by it.)
 - **The lidar one frame late**: a scan sent with its own frame's `/clock` races the EKF pose
   of that stamp to NDT, which then cannot interpolate and flaps MRM.
 
