@@ -8,8 +8,7 @@
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
-  <exec_depend>acb_launch</exec_depend>
-  <exec_depend>acb_pilot</exec_depend>
+  <exec_depend>autoware_sim_profile</exec_depend>
   <exec_depend>aib_vehicle_description</exec_depend>
   <exec_depend>aib_vehicle_launch</exec_depend>
   <exec_depend>aib_sensor_kit_description</exec_depend>

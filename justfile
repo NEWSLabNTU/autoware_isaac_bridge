@@ -7,8 +7,6 @@ project := justfile_directory()
 autoware_setup := env_var_or_default('AUTOWARE_SETUP', '/opt/autoware/1.5.0/setup.bash')
 # Isaac Sim 6.1's pip install (its venv, its bundled ROS 2 Humble). Environment, not a setting.
 isaac_root := env_var_or_default('ISAAC_ROOT', '/mnt/disk1/isaac-sim')
-# acb's install, for its ROS packages (acb_launch, acb_pilot) when not in this workspace.
-acb_setup := env_var_or_default('ACB_SETUP', '')
 specs := project + '/vehicles/*.yaml'
 
 # List available recipes
@@ -40,7 +38,8 @@ build: _check-setuptools check-generated
     #!/usr/bin/env bash
     set -e
     source "{{autoware_setup}}"
-    colcon build --base-paths src --symlink-install
+    # deps/autoware_sim_vehicle (a submodule): the Autoware profile aib_launch includes
+    colcon build --base-paths src deps/autoware_sim_vehicle --symlink-install
 
 # Remove build artifacts
 clean:
@@ -149,7 +148,6 @@ autoware *args:
     dds_uri="${CYCLONEDDS_URI:-}"
     source "{{autoware_setup}}"
     if [ -n "$dds_uri" ]; then export CYCLONEDDS_URI="$dds_uri"; fi
-    if [ -n "{{acb_setup}}" ]; then source "{{acb_setup}}"; fi
     source "{{project}}/install/setup.bash"
     export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
     exec play_launch launch --web-addr 0.0.0.0:${AIB_WEB_PORT:-8086} --log-dir play_log/ego \

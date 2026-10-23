@@ -1,37 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Autoware for an ego on Isaac Sim.
 
-     The Autoware side of an aib ego: acb's carla_simulator.launch.xml (Autoware 1.5.0 with
-     acb's simulation-tuned localization, perception, control and system configuration, the
-     acb_pilot vehicle agent) with aib's vehicle and sensor kit, and no vehicle interface of
-     its own: the Isaac side (aib's runner, or scenario-world-bridge's Isaac world server) publishes
-     /vehicle/status/*, /clock and the sensors on this domain and takes /control/command/*.
+     The Autoware side of an aib ego: the Autoware profile for a simulated car
+     (autoware_sim_profile, from autoware_sim_vehicle) with aib's vehicle and sensor kit, and no
+     vehicle interface of its own: the Isaac side (aib's runner, or scenario-world-bridge's
+     Isaac world server) publishes /vehicle/status/*, /clock and the sensors on this domain
+     and takes /control/command/*.
 
        ROS_DOMAIN_ID=1 play_launch launch aib_launch isaac_simulator.launch.xml \
-           map_path:=<map dir> [relay:=tcp://host:5560] [rviz:=false] [name:=value ...]
+           map_path:=<map dir> [rviz:=false] [name:=value ...]
 
-     Every other argument is carla_simulator.launch.xml's and passes through (launch
-     arguments are global): map_path, data_path, rviz, relay, entity, goal_poses_file, gpu,
-     extra_launch, lidar_detection_model, perception... Its CARLA-only ones (carla_host,
-     carla_port, vehicle_name, the V2X signal table) belong to acb_bridge, which is not
-     started.
-
-     Why include rather than copy: the 400-line file is acb's tuning of Autoware for a
-     simulated car, and Isaac needs the same; a copy would drift. aib owns only what differs,
-     the vehicle and sensor models. Needs acb's ROS packages (acb_launch, acb_pilot) in the
-     environment: scenario-world-bridge builds both; standalone, source an acb install.
+     Every other argument is the profile's and passes through (launch arguments are global):
+     data_path, rviz, gpu, extra_launch, lidar_detection_model, perception, max_velocity...
+     Needs autoware_sim_vehicle's packages: deps/autoware_sim_vehicle (just build builds it).
 -->
 <launch>
   <arg name="map_path" description="point cloud and lanelet2 map directory path"/>
   <arg name="vehicle_model" default="aib_vehicle" description="vehicle model name"/>
   <arg name="sensor_model" default="aib_sensor_kit" description="sensor model name"/>
 
-  <include file="$(find-pkg-share acb_launch)/launch/carla_simulator.launch.xml">
+  <include file="$(find-pkg-share autoware_sim_profile)/launch/autoware.launch.xml">
     <arg name="map_path" value="$(var map_path)"/>
     <arg name="vehicle_model" value="$(var vehicle_model)"/>
     <arg name="sensor_model" value="$(var sensor_model)"/>
-    <arg name="simulator_type" value="isaac"/>
-    <!-- The Isaac side is the vehicle interface and the clock. -->
-    <arg name="launch_vehicle_interface" value="false"/>
   </include>
 </launch>

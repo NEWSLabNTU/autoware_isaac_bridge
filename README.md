@@ -24,11 +24,12 @@ file and checked against it.
 ### How it relates to acb and swb
 
 - **acb** is the same thing on CARLA: CARLA owns the car, acb_bridge (Rust) publishes its
-  sensors and status and applies Autoware's control. aib is the Isaac side's equivalent. It
-  reuses acb's Autoware configuration rather than copying it: `isaac_simulator.launch.xml`
-  includes acb's `carla_simulator.launch.xml` with aib's vehicle and sensor models and no
-  vehicle interface, and the vehicle agent is acb's `acb_pilot`. Topic names and frames are
-  acb's, so the same Autoware pipeline consumes them.
+  sensors and status and applies Autoware's control. aib is the Isaac side's equivalent.
+  Both include the same Autoware profile, `autoware_sim_profile` from
+  [autoware_sim_vehicle](https://github.com/NEWSLabNTU/autoware_sim_vehicle) (a submodule at
+  `deps/autoware_sim_vehicle`): `isaac_simulator.launch.xml` is that profile with aib's
+  vehicle and sensor models. Topic names and frames are the same, so the same Autoware
+  pipeline consumes them.
 - **[scenario-world-bridge](https://github.com/NEWSLabNTU/scenario-world-bridge)** (swb,
   carla-scenario-bridge or csb until its roadmap 046) runs scenario_simulator_v2 scenarios
   on CARLA or Isaac Sim. Each simulator is a world server behind swb's world protocol; its
@@ -42,9 +43,9 @@ file and checked against it.
 ## Quick start
 
 Prerequisites: Ubuntu 22.04, ROS 2 Humble, Autoware 1.5.0 (`/opt/autoware/1.5.0`), Isaac Sim
-6.1 installed with pip into a venv (`ISAAC_ROOT`, default `/mnt/disk1/isaac-sim`), and acb's
-ROS packages for the Autoware side (`ACB_SETUP=<acb>/install/setup.bash`, or a workspace that
-builds both, as swb's does).
+6.1 installed with pip into a venv (`ISAAC_ROOT`, default `/mnt/disk1/isaac-sim`), and
+`git submodule update --init --recursive` for `deps/autoware_sim_vehicle` (the Autoware
+profile and pilot, which `just build` builds).
 
 ```bash
 just setup      # once: Autoware's messages rebuilt for Isaac's Python
@@ -52,14 +53,15 @@ just build      # colcon build --symlink-install against Autoware (checks the ge
 just test       # unit tests (no Isaac needed), the generated-file check, the URDF check
 ```
 
-Drive it, standalone (no csb, no scenario):
+Drive it, standalone (no scenario runner):
 
 ```bash
 # terminal 1: the Isaac side -- the world, the ego, its sensors and vehicle interface
 DISPLAY=:8 just isaac-ego world:=/path/to/Town01_physics.usda pose:=x,y,z,yaw
 # terminal 2: Autoware on the ego's domain (1)
-ROS_DOMAIN_ID=1 ACB_SETUP=<acb>/install/setup.bash \
-    just autoware map_path:=/path/to/maps/Town01 goal_poses_file:=<goal.yaml>
+ROS_DOMAIN_ID=1 just autoware map_path:=/path/to/maps/Town01
+# terminal 3: drive to a goal (or set one in RViz)
+ROS_DOMAIN_ID=1 ros2 run autoware_sim_pilot auto_drive --ros-args -p poses_file:=<poses.yaml>
 ```
 
 Without `world:=` the ego stands on a flat ground plane, which is enough to check the
