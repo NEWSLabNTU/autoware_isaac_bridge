@@ -16,7 +16,8 @@ Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
 rig's `tire_friction` until a host writes another (`set_wheel_friction`). A host with a
 surface map (csb's surface layer, roadmap 047) writes it every substep from the wheel's
-ground (`contacts`); PhysX takes the edit on the next step. The friction-vs-slip graph is
+ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
+inputs of csb's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
 host's to apply through the same friction value. The tables live outside the vehicle and stay
 when it goes: PhysX refuses to remove a tire friction table while the simulation plays
@@ -30,6 +31,8 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
                                         VEHICLE_WHEEL_STATE_GROUND_SHAPE,
                                         VEHICLE_WHEEL_STATE_IS_ON_GROUND,
                                         VEHICLE_WHEEL_STATE_ROTATION_SPEED,
+                                        VEHICLE_WHEEL_STATE_SUSPENSION_FORCE,
+                                        VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP)
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
@@ -51,6 +54,8 @@ class Contact(NamedTuple):
     on_ground: bool = False
     position: tuple = (0.0, 0.0, 0.0)  # the suspension ray's hit, world frame
     shape: str = ""  # the collider's prim path ("" when off the ground)
+    load: float = 0.0  # the suspension force's magnitude, N: what the ground carries
+    direction: tuple = (1.0, 0.0, 0.0)  # the tire's rolling direction, world frame, unit
 
 
 def ensure_vehicle_scene(stage):
@@ -271,9 +276,12 @@ class Vehicle:
                 float(w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP]),
                 on_ground))
             if on_ground:
+                f = w[VEHICLE_WHEEL_STATE_SUSPENSION_FORCE]
                 contacts.append(Contact(
                     True, tuple(float(c) for c in w[VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION]),
-                    str(w[VEHICLE_WHEEL_STATE_GROUND_SHAPE])))
+                    str(w[VEHICLE_WHEEL_STATE_GROUND_SHAPE]),
+                    math.sqrt(sum(float(c) ** 2 for c in f)),
+                    tuple(float(c) for c in w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION])))
             else:
                 contacts.append(Contact())
         return out, contacts
