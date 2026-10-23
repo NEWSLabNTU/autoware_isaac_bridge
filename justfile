@@ -78,7 +78,7 @@ test-isaac:
 check: test
     python3 -m pyflakes src/aib
 
-# Run one ego in an Isaac world, no csb/SSv2 (Isaac's Python). Settings as name:=value:
+# Run one ego in an Isaac world, no swb/SSv2 (Isaac's Python). Settings as name:=value:
 #   ego:=<yaml>      ego config (default src/aib/config/ego.yaml)
 #   world:=<usd>     the stage to drive in, with its colliders; empty: a flat ground plane
 #   pose:=x,y,z,yaw  base_link's start in the world (default 0,0,0.05,0)
@@ -109,6 +109,58 @@ isaac-ego *args:
     export PYTHONPATH="{{project}}/src/aib:$PYTHONPATH"
     exec python -m aib.runner --ego "$ego" --world "$world" --pose="$pose" \
         --display "$display" "${extra[@]}"
+
+# vehicle_check (autoware_sim_vehicle's autoware_sim_check) on Isaac, without SSv2 or Autoware:
+# the ego on a flat ground plane (`just isaac-ego realtime:=true`, headless), then the contract
+# (topics, types, rates, frames, stamps, /robot_description) and the dynamics run (acceleration
+# and brake steps against 0.35 m/s^2, a steering sweep against the bicycle model), on the ego
+# config's ROS domain. Writes <out>/report.json; exits 0 only if every check passed.
+#
+# Usage: just vehicle-check [ego:=<yaml>] [out:=<dir>]
+[positional-arguments]
+vehicle-check *args:
+    #!/usr/bin/env bash
+    set -e
+    ego="{{project}}/src/aib/config/ego.yaml"; out="{{project}}/play_log/vehicle_check/$(date +%F_%H-%M-%S)"
+    for a in "$@"; do
+        case "$a" in
+            ego:=?*) ego="${a#*:=}" ;;
+            out:=?*) out="${a#*:=}" ;;
+            *) echo "unknown argument $a (ego:=, out:=)" >&2; exit 2 ;;
+        esac
+    done
+    mkdir -p "$out"
+    export ROS_DOMAIN_ID=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1])).get("domain", 1))' "$ego")
+    groups=()
+    stop() { for g in "${groups[@]}"; do kill -TERM -"$g" 2>/dev/null || true; done
+             sleep 20; for g in "${groups[@]}"; do kill -KILL -"$g" 2>/dev/null || true; done; }
+    trap stop EXIT
+    setsid env -u DISPLAY ISAAC_HEADLESS=1 just --justfile "{{justfile()}}" isaac-ego ego:="$ego" \
+        realtime:=true > "$out/runner.log" 2>&1 < /dev/null &
+    runner=$!; groups+=($runner)
+    source "{{autoware_setup}}"; source "{{project}}/install/setup.bash"
+    echo "[vehicle-check] waiting for the Isaac ego (domain $ROS_DOMAIN_ID)"
+    until timeout 10 ros2 topic echo --once /vehicle/status/velocity_status > /dev/null 2>&1; do
+        kill -0 $runner 2>/dev/null || { echo "[vehicle-check] the runner exited; see $out/runner.log" >&2; exit 1; }
+        sleep 5
+    done
+    model=$(python3 -c 'import os, sys, yaml
+    ego = sys.argv[1]
+    rig = os.path.join(os.path.dirname(ego), yaml.safe_load(open(ego))["rig"])
+    print(yaml.safe_load(open(rig)).get("name", "tesla_model3"))' "$ego")
+    play_launch launch --disable-web-ui --log-dir "$out/check_log" \
+        autoware_sim_check vehicle_check.launch.xml simulator:=isaac vehicle_model:="$model" \
+        out:="$out/report.json" > "$out/check.log" 2>&1 < /dev/null || true
+    [ -f "$out/report.json" ] || { echo "[vehicle-check] no report; see $out/check.log" >&2; exit 1; }
+    python3 - "$out/report.json" <<'PY'
+    import json, sys
+    r = json.load(open(sys.argv[1]))
+    bad = [t for t, p in r["contract"].items() if p] + [s["step"] for s in r["dynamics"] if not s["pass"]]
+    for s in r["dynamics"]:
+        print(f'  {s["step"]:12} {"pass" if s["pass"] else "FAIL"}  ' + ", ".join(f"{k} {v}" for k, v in s.items() if k not in ("step", "pass")))
+    print(f'[vehicle-check] {r["vehicle_model"]} on {r["simulator"]}: ' + ("PASS" if not bad else "FAIL: " + ", ".join(bad)))
+    sys.exit(1 if bad else 0)
+    PY
 
 # Open-loop step tests of the PhysX vehicle and powertrain in Isaac, no ROS (aib.steptest):
 #   out:=<dir>          where the CSVs and summary.json go (default /mnt/disk1/aib-ev/steptest)
