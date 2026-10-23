@@ -45,11 +45,13 @@ def pack_cloud(xyz, intensity=None, elevation=None, channels=128):
                                ("return_type", "u1"), ("channel", "<u2")])
     cloud["x"], cloud["y"], cloud["z"] = xyz[:, 0], xyz[:, 1], xyz[:, 2]
     if intensity is not None:
-        inten = np.asarray(intensity, dtype=np.float32)
+        # Flat: the RTX lidar's annotator hands a 0-d array when it has nothing per point, which
+        # len() refused, and the exception ended the runner (vehicle_check, roadmap 051).
+        inten = np.asarray(intensity, dtype=np.float32).reshape(-1)
         if len(inten) == n:
             cloud["intensity"] = np.clip(inten * 255.0, 0, 255).astype(np.uint8)
     if elevation is not None:
-        elev = np.asarray(elevation, dtype=np.float32)
+        elev = np.asarray(elevation, dtype=np.float32).reshape(-1)
         if len(elev) == n and n:
             lo, hi = float(elev.min()), float(elev.max())
             if hi > lo:

@@ -92,6 +92,14 @@ class CloudTest(unittest.TestCase):
     def test_no_points(self):
         self.assertEqual(pack_cloud(np.zeros((0, 3)))[0], 0)
 
+    def test_a_scalar_intensity_or_elevation_is_ignored(self):
+        # What the RTX lidar's annotator gave on a ground plane: a 0-d array per field.
+        xyz = np.ones((4, 3))
+        n, data = pack_cloud(xyz, np.float32(0.5), np.float32(0.1))
+        self.assertEqual(n, 4)
+        self.assertEqual(len(data), 4 * 16)
+        self.assertEqual(pack_cloud(np.zeros((0, 3)), np.float32(0.5), np.float32(0.1))[0], 0)
+
 
 class MiscTest(unittest.TestCase):
     def test_the_usd_camera_looks_down_the_link_x(self):
