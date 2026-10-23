@@ -3,16 +3,17 @@
 <package format="3">
   <name>aib_launch</name>
   <version>0.1.0</version>
-  <description>Autoware on Isaac Sim with the aib vehicle and sensor kit: isaac_simulator.launch.xml.</description>
+  <description>Autoware on Isaac Sim with the car's vehicle and sensor kit packages: isaac_simulator.launch.xml.</description>
   <maintainer email="jerry73204@gmail.com">NEWSLab NTU</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
   <exec_depend>autoware_sim_profile</exec_depend>
-  <exec_depend>aib_vehicle_description</exec_depend>
-  <exec_depend>aib_vehicle_launch</exec_depend>
-  <exec_depend>aib_sensor_kit_description</exec_depend>
-  <exec_depend>aib_sensor_kit_launch</exec_depend>
+  <!-- the car's packages (autoware_sim_vehicle) -->
+  <exec_depend>tesla_model3_description</exec_depend>
+  <exec_depend>tesla_model3_launch</exec_depend>
+  <exec_depend>tesla_model3_sensor_kit_description</exec_depend>
+  <exec_depend>tesla_model3_sensor_kit_launch</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

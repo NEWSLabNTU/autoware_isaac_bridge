@@ -3,23 +3,23 @@
 ## Pieces
 
 ```
-vehicles/<name>.yaml ──aib.gen──┬─> aib_vehicle_description/config/vehicle_info.param.yaml, mirror.param.yaml
-   (the vehicle spec)           ├─> aib_sensor_kit_description/config/sensors_calibration.yaml,
-                                │   sensor_kit_calibration.yaml, urdf/sensor_kit.xacro
-                                ├─> aib_individual_params/config/default/aib_sensor_kit/ (same calibration)
-                                └─> src/aib/config/<name>.rig.yaml  (the Isaac rig)
+deps/sim_vehicle_spec/vehicles/<name>.yaml ──aib.gen──> src/aib/config/<name>.rig.yaml (the Isaac rig)
+   (the vehicle spec, a submodule)        ──autoware_gen (autoware_sim_vehicle)──> <name>_description,
+                                             <name>_launch, <name>_sensor_kit_{description,launch}
 
 Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (aib.isaac) in the
    aib_launch isaac_simulator.launch.xml   ── /control/command/* ──>   process stepping the world:
    = acb's carla_simulator.launch.xml                                    csb's world server, or
-     + aib_vehicle, aib_sensor_kit                                       aib.runner
+     + tesla_model3, its sensor kit                                      aib.runner
      - vehicle interface
 ```
 
-- **The spec** is the vehicle: one YAML per vehicle ([spec-format.md](spec-format.md)).
-- **The generator** (`aib.gen`) writes every file the spec owns and has a check mode that
-  fails when any is stale. Autoware reads the description and calibration as for any other
-  vehicle; the Isaac side reads the rig.
+- **The spec** is the vehicle: one YAML per vehicle, sim_vehicle_spec's (roadmap 051 of
+  scenario-world-bridge; its `docs/spec-format.md`). The same spec gives Autoware's packages
+  (autoware_sim_vehicle), CARLA's files and the SSv2 catalog.
+- **The generator** (`aib.gen`) writes the rig, the one output that is aib's, and has a
+  check mode that fails when it is stale. Autoware reads autoware_sim_vehicle's description
+  and calibration as for any other vehicle; the Isaac side reads the rig.
 - **The rig** (`<name>.rig.yaml`) is the spec flattened for the Isaac side: `VehicleParams`
   (one flat field per physics number), the chassis box, each sensor with its base_link
   transform resolved. A host never reads Autoware's files to build the ego.
@@ -32,8 +32,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 
 | module | needs | what |
 |---|---|---|
-| `aib.spec` | yaml | load and validate a spec; derive VehicleParams, the box, sensors in base_link, camera K |
-| `aib.gen` | yaml | the generator and its `--check` |
+| `aib.gen` | yaml, sim_vehicle_spec | the rig from a spec (VehicleParams from the spec, the box, sensors in base_link, camera K) and its `--check` |
 | `aib.params` | - | `VehicleParams`; axle loads, brake split, suspension rates, inertia; geometry check |
 | `aib.control` | - | `Command`, `State`, gears, the steering actuator, Ackermann |
 | `aib.powertrain` | - | the powertrain seam; `ideal` |
@@ -201,20 +200,13 @@ simulator name now, on either bridge. The camera publishes in `camera6/camera_op
 
 ## Single source of truth
 
-The spec is the only file a person edits to change the vehicle. Generated files start with
-`Generated from <spec> by aib.gen ...: do not edit.`; `just check-generated` (run by
-`just build` and `just test`, and by the unit test `test_gen.CheckTest`) fails when any
-output differs from what the spec gives.
-
-What is not generated, and why:
-
-- `simulator_model.param.yaml` (Autoware's planning simulator only), the sensor kit's
-  launch files (Autoware's pipeline; a unit test checks that their input topics are the
-  rig's), `vehicle.xacro` and `sensors.xacro` (they read the generated yaml).
-- acb's `vehicle_config.yaml` and its vehicle description are still acb's own. They can be
-  generated from the same spec later (the spec already has the geometry, the sensor mounts
-  and the camera/lidar intrinsics acb's config carries), which would make one spec drive the
-  same car on CARLA and on Isaac. Not done yet.
+The spec (sim_vehicle_spec) is the only file a person edits to change the vehicle, on
+CARLA and on Isaac. The rig starts with `Generated from <spec> (spec_hash ...) by aib.gen
+...: do not edit` and carries the `spec_hash`; `just check-generated` (run by `just build`
+and `just test`, and by the unit test `test_gen.CheckTest`) fails when it differs from what
+the spec gives. `test_gen.AgreesWithAutowareTest` checks the rig against Autoware's packages
+for the same car (autoware_sim_vehicle): the same spec_hash, geometry and box, and every
+sensor at the same transform.
 
 ## Standalone runner
 

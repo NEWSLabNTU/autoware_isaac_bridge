@@ -1,4 +1,5 @@
-"""The generator: outputs, headers, and the staleness check. Pure."""
+"""The generator: the rig from the spec, its header, the staleness check, and that the rig and
+Autoware's packages for the same car (autoware_sim_vehicle) agree. Pure."""
 import shutil
 import tempfile
 import unittest
@@ -6,89 +7,85 @@ from pathlib import Path
 
 import yaml
 
-from _paths import REPO, SPEC
+from _paths import REPO, RIG, SPEC
 from aib import gen
 from aib.frames import kit_transform
 from aib.params import read_vehicle_info
 from aib.rig import Rig
 
+CAR = REPO / "deps/autoware_sim_vehicle/cars/tesla_model3"
+RIG_REL = "src/aib/config/tesla_model3.rig.yaml"
+
 
 class CheckTest(unittest.TestCase):
     def test_the_repository_is_up_to_date(self):
-        # The CI check: fails when someone edits the spec without `just generate`, or edits
-        # a generated file by hand.
-        self.assertEqual(gen.stale(SPEC, REPO), [])
+        # The CI check: fails when the spec moved without `just generate`, or the rig was
+        # edited by hand.
+        self.assertEqual(gen.stale(), [])
+
+    def test_the_only_output_is_the_rig(self):
+        self.assertEqual(list(gen.outputs()), [RIG_REL])
 
     def test_a_hand_edit_is_stale_and_generate_fixes_it(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "vehicles").mkdir()
-            (root / "src").mkdir()
-            spec = root / "vehicles" / SPEC.name
-            shutil.copy(SPEC, spec)
-            outs = gen.outputs(spec, root)
-            self.assertEqual(sorted(gen.stale(spec, root)), sorted(outs))
-            self.assertEqual(sorted(gen.write(spec, root)), sorted(outs))
-            self.assertEqual(gen.stale(spec, root), [])
-            info = root / "src/aib_vehicle_launch/aib_vehicle_description/config/vehicle_info.param.yaml"
-            info.write_text(info.read_text().replace("3.005", "3.1"))
-            self.assertEqual(gen.stale(spec, root), [str(info.relative_to(root))])
-            self.assertEqual(gen.main([str(spec), "--root", str(root), "--check"]), 1)
-            self.assertEqual(gen.main([str(spec), "--root", str(root)]), 0)
-            self.assertEqual(gen.main([str(spec), "--root", str(root), "--check"]), 0)
+            root, specs = Path(tmp), Path(tmp) / "specs"
+            specs.mkdir()
+            shutil.copy(SPEC, specs / SPEC.name)
+            outs = gen.outputs(specs, root)
+            self.assertEqual(sorted(gen.stale(specs, root)), sorted(outs))
+            self.assertEqual(sorted(gen.write(specs, root)), sorted(outs))
+            self.assertEqual(gen.stale(specs, root), [])
+            rig = root / RIG_REL
+            rig.write_text(rig.read_text().replace("3.005", "3.1"))
+            self.assertEqual(gen.stale(specs, root), [RIG_REL])
+            args = ["--specs", str(specs), "--root", str(root)]
+            self.assertEqual(gen.main(args + ["--check"]), 1)
+            self.assertEqual(gen.main(args), 0)
+            self.assertEqual(gen.main(args + ["--check"]), 0)
 
-    def test_every_output_says_where_it_came_from(self):
-        for path, text in gen.outputs(SPEC, REPO).items():
-            head = "\n".join(text.splitlines()[:3])
-            self.assertIn("Generated from vehicles/tesla_model3.yaml", head, path)
-            self.assertIn("do not edit", head, path)
+    def test_the_rig_names_its_spec_and_hash(self):
+        text = gen.outputs()[RIG_REL]
+        head = text.splitlines()[0]
+        self.assertIn("Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml", head)
+        self.assertIn("do not edit", head)
+        rig = Rig.load(RIG)
+        self.assertEqual(rig.spec_hash, gen.specmod.spec_hash(gen.specmod.load(SPEC)))
+        self.assertIn(rig.spec_hash, head)
 
 
-class OutputTest(unittest.TestCase):
+class AgreesWithAutowareTest(unittest.TestCase):
+    """The rig and Autoware's packages are generated from one spec, by two generators: they
+    must place the car and its sensors the same."""
+
     def setUp(self):
-        self.out = gen.outputs(SPEC, REPO)
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        for p, text in self.out.items():
-            f = self.root / p
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(text)
+        self.rig = Rig.load(RIG)
 
-    def tearDown(self):
-        self.tmp.cleanup()
+    def test_the_spec_hashes_match(self):
+        text = (CAR / "tesla_model3_description/config/spec_hash.yaml").read_text()
+        self.assertIn(f"spec_hash: {self.rig.spec_hash}", text)
 
-    def test_vehicle_info_is_the_geometry(self):
-        doc = yaml.safe_load(self.out[
-            "src/aib_vehicle_launch/aib_vehicle_description/config/vehicle_info.param.yaml"])
-        p = doc["/**"]["ros__parameters"]
-        self.assertEqual(p["wheel_base"], 3.005)
-        self.assertEqual(p["max_steer_angle"], 0.70)
-        self.assertEqual(len(p), 10)
-        info = read_vehicle_info(self.root / "src/aib_vehicle_launch/aib_vehicle_description/"
-                                 "config/vehicle_info.param.yaml")
-        self.assertEqual(info["wheel_tread"], 1.667)
+    def test_vehicle_info_is_the_rigs_geometry(self):
+        path = CAR / "tesla_model3_description/config/vehicle_info.param.yaml"
+        info = yaml.safe_load(path.read_text())["/**"]["ros__parameters"]
+        self.assertEqual(read_vehicle_info(path)["wheel_base"], info["wheel_base"])
+        v = self.rig.vehicle
+        for k in ("wheel_base", "wheel_tread", "wheel_radius", "wheel_width", "max_steer_angle"):
+            self.assertAlmostEqual(info[k], getattr(v, k), msg=k)
+        length = info["wheel_base"] + info["front_overhang"] + info["rear_overhang"]
+        self.assertAlmostEqual(length, self.rig.box_dims[0], places=6)
+        centre = (info["wheel_base"] + info["front_overhang"] - info["rear_overhang"]) / 2
+        self.assertAlmostEqual(centre, self.rig.box_center[0], places=6)
 
-    def test_the_calibration_places_the_lidar_where_csb_did(self):
-        d = self.root / "src/aib_sensor_kit_launch/aib_sensor_kit_description/config"
-        t, q = kit_transform(d / "sensors_calibration.yaml", d / "sensor_kit_calibration.yaml",
-                             "velodyne_top_base_link")
-        rig = Rig.load(self.root / "src/aib/config/tesla_model3.rig.yaml")
-        for a, b in zip(t, rig.sensors["top"].translation):
-            self.assertAlmostEqual(a, b, places=8)
-        for a, b in zip(q, rig.sensors["top"].quat):
-            self.assertAlmostEqual(a, b, places=8)
-
-    def test_individual_params_is_the_description_calibration(self):
-        a = "src/aib_sensor_kit_launch/aib_sensor_kit_description/config/"
-        b = "src/aib_individual_params/config/default/aib_sensor_kit/"
-        for name in ("sensors_calibration.yaml", "sensor_kit_calibration.yaml"):
-            self.assertEqual(self.out[a + name], self.out[b + name])
-
-    def test_the_xacro_names_every_sensor_link(self):
-        x = self.out["src/aib_sensor_kit_launch/aib_sensor_kit_description/urdf/sensor_kit.xacro"]
-        for link in ("top_base_link", '"top"', "camera6/camera_optical_link", "imu_link",
-                     "gnss_link", "velodyne_top_base_link"):
-            self.assertIn(link, x)
+    def test_the_calibration_places_every_sensor_where_the_rig_does(self):
+        d = CAR / "tesla_model3_sensor_kit_description/config"
+        rig_keys = gen.specmod.sensors(gen.specmod.load(SPEC))
+        for name, s in self.rig.sensors.items():
+            t, q = kit_transform(d / "sensors_calibration.yaml", d / "sensor_kit_calibration.yaml",
+                                 rig_keys[name]["key"])
+            for a, b in zip(t, s.translation):
+                self.assertAlmostEqual(a, b, places=8, msg=name)
+            for a, b in zip(q, s.quat):
+                self.assertAlmostEqual(a, b, places=8, msg=name)
 
 
 if __name__ == "__main__":

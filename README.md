@@ -5,21 +5,23 @@ An [Autoware](https://autowarefoundation.github.io/autoware-documentation/) ego 
 sensors it sees through, and the vehicle interface between them. The Isaac Sim counterpart of
 [autoware_carla_bridge](https://github.com/NEWSLabNTU/autoware_carla_bridge) (acb).
 
-The vehicle is described once, in a vehicle spec (`vehicles/tesla_model3.yaml`), and
-everything else about it -- Autoware's vehicle description, the sensor kit calibration and
-URDF, the Isaac rig the PhysX vehicle and sensors are built from -- is generated from that
-file and checked against it.
+The vehicle is described once, in a vehicle spec
+([sim_vehicle_spec](https://github.com/NEWSLabNTU/sim_vehicle_spec), a submodule at
+`deps/sim_vehicle_spec`: `vehicles/tesla_model3.yaml`). The Isaac rig the PhysX vehicle and
+sensors are built from is generated from it here; Autoware's packages for the same car
+(`tesla_model3_description`, `tesla_model3_sensor_kit_launch`, ...) are generated from it in
+[autoware_sim_vehicle](https://github.com/NEWSLabNTU/autoware_sim_vehicle) (a submodule at
+`deps/autoware_sim_vehicle`), and CARLA's files and the SSv2 catalog in sim_vehicle_spec
+itself. Every generated file names the spec's `spec_hash`.
 
 ## What is in it
 
 | | |
 |---|---|
-| `vehicles/` | Vehicle specs: geometry, mass and centre of mass, wheels, tires, brakes, powertrain, steering, suspension, PhysX settings, sensor mounts and intrinsics, and where each number comes from ([docs/spec-format.md](docs/spec-format.md)) |
-| `src/aib/` | The Python library. Pure (no Isaac, no ROS): the spec, the generator, the vehicle parameters, the powertrain seam, the steering, sensor maths. `aib.ros`: Autoware's vehicle interface and the sensor topics (rclpy). `aib.isaac`: the PhysX vehicle, the RTX lidar, camera, IMU and GNSS, and the `Ego` that ties them to a world. `aib.runner`: one ego in an Isaac world, standalone |
-| `src/aib_vehicle_launch/` | `aib_vehicle_description` (vehicle_info, mirror, an RViz body) and `aib_vehicle_launch`, Autoware's `vehicle_model:=aib_vehicle` |
-| `src/aib_sensor_kit_launch/` | `aib_sensor_kit_description` (calibration, URDF) and `aib_sensor_kit_launch` (Autoware's sensing pipeline for the kit), `sensor_model:=aib_sensor_kit` |
-| `src/aib_individual_params/` | The kit's calibration as `individual_params` would hold it (named so it can share a workspace with acb's `individual_params`) |
-| `src/aib_launch/` | `isaac_simulator.launch.xml`: Autoware for the Isaac ego |
+| `deps/sim_vehicle_spec/` | The vehicle specs (submodule): geometry, mass and centre of mass, wheels, tires, brakes, powertrain, steering, suspension, PhysX settings (`isaac.physx`), sensor mounts and intrinsics, and where each number comes from (its `docs/spec-format.md`) |
+| `deps/autoware_sim_vehicle/` | Autoware's packages per car and the Autoware profile (submodule) |
+| `src/aib/` | The Python library. Pure (no Isaac, no ROS): the rig generator, the vehicle parameters, the powertrain seam, the steering, sensor maths. `aib.ros`: Autoware's vehicle interface and the sensor topics (rclpy). `aib.isaac`: the PhysX vehicle, the RTX lidar, camera, IMU and GNSS, and the `Ego` that ties them to a world. `aib.runner`: one ego in an Isaac world, standalone |
+| `src/aib_launch/` | `isaac_simulator.launch.xml`: Autoware for the Isaac ego (`vehicle_model:=tesla_model3`, autoware_sim_vehicle's packages) |
 
 ### How it relates to acb and swb
 
@@ -69,20 +71,21 @@ vehicle and sensors but not to localize against a map.
 
 ### Changing the vehicle
 
-Edit the spec, then regenerate:
+Change the spec in sim_vehicle_spec (and regenerate there and in autoware_sim_vehicle), move
+the `deps/` pins to it, then regenerate the rig:
 
 ```bash
-$EDITOR vehicles/tesla_model3.yaml
-just generate          # rewrites the files the spec owns
+just generate          # rewrites src/aib/config/<name>.rig.yaml from deps/sim_vehicle_spec
 just check-generated   # what CI (and `just build`, `just test`) runs: fails when stale
 ```
 
-The generated files carry a `Generated from vehicles/... do not edit` header. A hand edit to
-one makes `check-generated` fail.
+The rig carries a `Generated from sim_vehicle_spec/vehicles/... (spec_hash ...) do not edit`
+header. A hand edit, or a spec pin moved without `just generate`, makes `check-generated`
+fail; a unit test checks the rig places the car and every sensor as Autoware's packages do.
 
 ## Status
 
-- The pure library, the generator and the Autoware packages are tested here (`just test`;
+- The pure library and the rig generator are tested here (`just test`;
   `play_launch dump` of `isaac_simulator.launch.xml` resolves the same 205 nodes as acb's
   `carla_simulator.launch.xml` without its bridge).
 - The Isaac code (`aib.isaac`, `aib.runner`) is csb_isaac's ego (swb's `isaac_world` now), which drives swb's Isaac
@@ -101,7 +104,7 @@ one makes `check-generated` fail.
 ## Documentation
 
 - [docs/design.md](docs/design.md) -- the pieces, the frame loop, the SSoT flow, the powertrain seam
-- [docs/spec-format.md](docs/spec-format.md) -- the vehicle spec, key by key
+- sim_vehicle_spec's `docs/spec-format.md` -- the vehicle spec, key by key
 
 ## License
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from _paths import EGO, REPO, RIG
 from aib.rig import EgoConfig, Rig
 
-KIT = REPO / "src/aib_sensor_kit_launch/aib_sensor_kit_launch/launch"
+KIT = REPO / "deps/autoware_sim_vehicle/cars/tesla_model3/tesla_model3_sensor_kit_launch/launch"
 
 
 class RigTest(unittest.TestCase):

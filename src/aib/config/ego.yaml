@@ -1,5 +1,6 @@
 # An ego run (aib.rig.EgoConfig): which vehicle, on which ROS domain, with which clock.
-# The vehicle itself is the rig, generated from its spec (vehicles/<name>.yaml): edit the
+# The vehicle itself is the rig, generated from its spec
+# (deps/sim_vehicle_spec/vehicles/<name>.yaml): edit the
 # spec and `just generate`, not the rig. Paths are relative to this file.
 rig: tesla_model3.rig.yaml
 # The ego's ROS domain: Autoware runs there (`just autoware`, `ROS_DOMAIN_ID`).

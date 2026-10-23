@@ -46,6 +46,7 @@ class Rig:
     catalogue_model: str = ""
     sensors: dict = field(default_factory=dict)  # name -> SensorRig
     assumptions: list = field(default_factory=list)
+    spec_hash: str = ""  # the sim_vehicle_spec spec this rig was generated from
     path: str = ""
 
     @classmethod
@@ -81,6 +82,7 @@ class Rig:
                    box_dims=tuple(body.get("box_dims", (4.8, 2.1, 1.5))),
                    catalogue_model=body.get("catalogue_model", ""),
                    sensors=sensors, assumptions=list(doc.get("assumptions") or []),
+                   spec_hash=str(doc.get("spec_hash") or ""),
                    path=str(path))
 
     def of_type(self, kind, enabled_only=True):

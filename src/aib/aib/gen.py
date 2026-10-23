@@ -1,171 +1,97 @@
-"""The generator: a vehicle spec to Autoware's vehicle and sensor kit files and the Isaac rig.
+"""The Isaac rig from a vehicle spec (roadmap 051): what aib builds the PhysX vehicle and its
+sensors from (aib.rig).
 
-    python -m aib.gen vehicles/tesla_model3.yaml [--root .]           # write
-    python -m aib.gen vehicles/tesla_model3.yaml [--root .] --check   # exit 1 when stale
+    python -m aib.gen [--specs deps/sim_vehicle_spec/vehicles] [--root .]           # write
+    python -m aib.gen ... --check   # exit 1 when a rig is stale
 
-Every file it writes starts with a header naming the spec and saying not to edit it. Paths
-follow Autoware's naming: for `autoware.vehicle_model: V` and `sensor_model: S`,
-
-    src/V_launch/V_description/config/vehicle_info.param.yaml, mirror.param.yaml
-    src/S_launch/S_description/config/sensors_calibration.yaml, sensor_kit_calibration.yaml
-    src/S_launch/S_description/urdf/sensor_kit.xacro
-    src/aib_individual_params/config/default/S/  (the same two calibration files)
-    src/aib/config/<name>.rig.yaml               (the Isaac rig, aib.rig)
+The spec is sim_vehicle_spec's (deps/sim_vehicle_spec, a submodule): one per car, the same one
+Autoware's packages (autoware_sim_vehicle), CARLA's files and the SSv2 catalog come from. This
+writes only what is aib's: `src/aib/config/<name>.rig.yaml`, whose `vehicle` is aib's own
+parameter schema (aib.params.VehicleParams). Every rig names its spec and spec_hash.
 """
 import argparse
 import sys
 from pathlib import Path
 
-from . import spec as specmod
+REPO = Path(__file__).resolve().parents[3]
+SPECS = REPO / "deps/sim_vehicle_spec/vehicles"
+if str(REPO / "deps/sim_vehicle_spec") not in sys.path:
+    sys.path.insert(0, str(REPO / "deps/sim_vehicle_spec"))
 
-HEADER = "Generated from {spec} by aib.gen (`just generate`): do not edit."
+from sim_vehicle_spec import emit  # noqa: E402
+from sim_vehicle_spec import spec as specmod  # noqa: E402
 
+from .params import VehicleParams  # noqa: E402
 
-def _num(v):
-    if isinstance(v, bool) or isinstance(v, int):
-        return v
-    if isinstance(v, float):
-        r = round(v, 9)
-        return 0.0 if r == 0 else r
-    return v
-
-
-def _round(v):
-    if isinstance(v, dict):
-        return {k: _round(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_round(x) for x in v]
-    return _num(v)
+TOOL = "aib.gen (autoware_isaac_bridge `just generate`)"
 
 
-def _fmt(v):
-    """A value from the spec as written (no rounding: a calibration keeps its digits)."""
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    return repr(v)
+def vehicle_params(spec):
+    """The flat VehicleParams of a spec."""
+    d = spec.doc
+    g, i, w, t = d["geometry"], d["inertia"], d["wheels"], d["tires"]
+    b, p = d["brakes"], d["powertrain"]
+    rs = d.get("resistance")
+    abs_ = b.get("abs") or {}
+    tc = p.get("traction_control") or {}
+    st, su = spec.section("steering"), d["suspension"]
+    px = spec.section("isaac").get("physx") or {}
+    base = VehicleParams()
+    values = dict(
+        model=spec.section("body").get("catalogue_model", ""),
+        wheel_base=g["wheel_base"], wheel_tread=g["wheel_tread"],
+        wheel_radius=g["wheel_radius"], wheel_width=g["wheel_width"],
+        max_steer_angle=g["max_steer_angle"],
+        mass=i["mass"],
+        com=(i["com_front_fraction"] * g["wheel_base"], i.get("com_lateral", 0.0), i["com_height"]),
+        inertia_box=tuple(i.get("inertia_box", base.inertia_box)),
+        wheel_mass=w["mass"], wheel_damping_rate=w.get("damping_rate", base.wheel_damping_rate),
+        tire_friction=t["friction"],
+        lat_stiff_max_load=t.get("lat_stiff_max_load", base.lat_stiff_max_load),
+        lat_stiff_value=t.get("lat_stiff_value", base.lat_stiff_value),
+        long_stiff_value=t.get("long_stiff_value", base.long_stiff_value),
+        friction_vs_slip=tuple(tuple(x) for x in t.get("friction_vs_slip", base.friction_vs_slip)),
+        powertrain=p["model"], max_drive_torque=p["max_drive_torque"],
+        max_brake_torque=b["max_brake_torque"],
+        hold_brake_torque=b.get("hold_brake_torque", base.hold_brake_torque),
+        brake_distribution=b.get("distribution", base.brake_distribution),
+        brake_dead_time=b.get("dead_time", base.brake_dead_time),
+        brake_time_constant=b.get("time_constant", base.brake_time_constant),
+        ackermann=bool(st.get("ackermann", True)),
+        steer_time_constant=st.get("time_constant", 0.0),
+        steer_rate_limit=st.get("rate_limit", 0.0),
+        suspension_frequency=su["frequency"], suspension_damping_ratio=su["damping_ratio"],
+        suspension_travel=su["travel"],
+    )
+    for key, field in (("enabled", "abs_enabled"), ("slip_release", "abs_slip_release"),
+                       ("slip_reapply", "abs_slip_reapply"), ("release_rate", "abs_release_rate"),
+                       ("apply_rate", "abs_apply_rate"), ("min_speed", "abs_min_speed")):
+        values[field] = abs_.get(key, getattr(base, field))
+    for key in ("drive_axle", "front_drive_share", "gear_ratio", "motor_peak_torque",
+                "motor_peak_power", "motor_max_rpm", "motor_time_constant", "regen_max_torque",
+                "regen_max_power"):
+        values[key] = p.get(key, getattr(base, key))
+    fade = p.get("regen_fade_speeds", (base.regen_fade_low, base.regen_fade_high))
+    values["regen_fade_low"], values["regen_fade_high"] = fade
+    for key, field in (("enabled", "tc_enabled"), ("slip_limit", "tc_slip_limit"),
+                       ("slip_reapply", "tc_slip_reapply"), ("release_rate", "tc_release_rate"),
+                       ("apply_rate", "tc_apply_rate")):
+        values[field] = tc.get(key, getattr(base, field))
+    # No `resistance` section: no road load (a spec says what its car has).
+    for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
+        values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)
+    values["air_density"] = (rs or {}).get("air_density", base.air_density)
+    names = {"substeps": "physx_substeps"}
+    for k, v in px.items():
+        values[names.get(k, k)] = v
+    out = {}
+    for k, v in values.items():
+        default = getattr(base, k)
+        if isinstance(default, float) and isinstance(v, int) and not isinstance(v, bool):
+            v = float(v)
+        out[k] = v
+    return VehicleParams.from_dict(out)
 
-
-def _comment(text, mark="#"):
-    return "".join(f"{mark} {line}".rstrip() + "\n" for line in text.splitlines())
-
-
-def _yaml(doc):
-    import yaml
-
-    return yaml.safe_dump(_round(doc), sort_keys=False, default_flow_style=None, width=100)
-
-
-# --- Autoware vehicle description -----------------------------------------------------------
-
-def vehicle_info(spec, header):
-    g = spec.doc["geometry"]
-    length = g["wheel_base"] + g["front_overhang"] + g["rear_overhang"]
-    width = g["wheel_tread"] + g["left_overhang"] + g["right_overhang"]
-    rows = [
-        ("wheel_radius", "ground to wheel centre"),
-        ("wheel_width", "lateral width of the tire"),
-        ("wheel_base", "front to rear axle centre"),
-        ("wheel_tread", "left to right wheel centre"),
-        ("front_overhang", "front axle to the front edge"),
-        ("rear_overhang", "rear axle to the rear edge"),
-        ("left_overhang", "left wheels to the left edge"),
-        ("right_overhang", "right wheels to the right edge"),
-        ("vehicle_height", "ground to the roof"),
-        ("max_steer_angle", "bicycle-model tire angle limit, rad"),
-    ]
-    out = _comment(header) + _comment(
-        f"Autoware's vehicle_info for {spec.name} (autoware_vehicle_info_utils::VehicleInfo).\n"
-        f"Length {_num(length)} m, width {_num(width)} m, height {_num(g['vehicle_height'])} m.")
-    out += "/**:\n  ros__parameters:\n"
-    for key, what in rows:
-        out += f"    {key}: {_fmt(g[key])}  # {what}\n"
-    return out
-
-
-def mirror(spec, header):
-    m = spec.doc["mirror"]
-    out = _comment(header) + "/**:\n  ros__parameters:\n"
-    for key in specmod.SECTIONS["mirror"][0]:
-        out += f"    {key}: {_fmt(m[key])}\n"
-    return out
-
-
-# --- sensor kit -----------------------------------------------------------------------------
-
-def _mount(m, indent):
-    pad = " " * indent
-    return "".join(f"{pad}{k}: {_fmt(m[k])}\n" for k in specmod.MOUNT_KEYS)
-
-
-def sensors_calibration(spec, header):
-    out = _comment(header) + _comment("base_link -> sensor_kit_base_link (the kit's mount).")
-    out += "base_link:\n  sensor_kit_base_link:\n" + _mount(spec.doc["sensor_kit"]["mount"], 4)
-    return out
-
-
-def sensor_kit_calibration(spec, header):
-    out = _comment(header) + _comment(
-        "Each sensor's mount in sensor_kit_base_link: metres (x forward, y left, z up), radians.")
-    out += "sensor_kit_base_link:\n"
-    for name, s in specmod.sensors(spec).items():
-        out += f"  # {name}: {s['type']}\n  {s['key']}:\n" + _mount(s["mount"], 4)
-    return out
-
-
-OPTICAL_RPY = "-1.5707963267948966 0 -1.5707963267948966"
-
-
-def sensor_kit_xacro(spec, header):
-    lines = [
-        '<?xml version="1.0"?>',
-        f"<!-- {header} -->",
-        f'<robot name="{spec.doc["autoware"]["sensor_model"]}" xmlns:xacro="http://ros.org/wiki/xacro">',
-        "  <!-- The sensor kit's links, each placed from sensor_kit_calibration.yaml under",
-        "       config_dir (Autoware's vehicle launch passes the description's config). -->",
-        f'  <xacro:arg name="config_dir" default="$(find {spec.doc["autoware"]["sensor_model"]}_description)/config"/>',
-        "",
-        '  <xacro:macro name="sensor_kit_macro" params="parent x y z roll pitch yaw">',
-        "    <xacro:property name=\"calibration\" value=\"${xacro.load_yaml('$(arg config_dir)/sensor_kit_calibration.yaml')}\"/>",
-        '    <joint name="sensor_kit_base_link_joint" type="fixed">',
-        '      <origin rpy="${roll} ${pitch} ${yaw}" xyz="${x} ${y} ${z}"/>',
-        '      <parent link="${parent}"/>',
-        '      <child link="sensor_kit_base_link"/>',
-        "    </joint>",
-        '    <link name="sensor_kit_base_link"/>',
-    ]
-    for name, s in specmod.sensors(spec).items():
-        key, link, frame = s["key"], s["link"], s["frame"]
-        c = f"calibration['sensor_kit_base_link']['{key}']"
-        lines += [
-            "",
-            f"    <!-- {name}: {s['type']}, published in {frame} on {s['topic']} -->",
-            f'    <joint name="{_joint(link)}" type="fixed">',
-            f'      <origin xyz="${{{c}[\'x\']}} ${{{c}[\'y\']}} ${{{c}[\'z\']}}"',
-            f'              rpy="${{{c}[\'roll\']}} ${{{c}[\'pitch\']}} ${{{c}[\'yaw\']}}"/>',
-            '      <parent link="sensor_kit_base_link"/>',
-            f'      <child link="{link}"/>',
-            "    </joint>",
-            f'    <link name="{link}"/>',
-        ]
-        if frame != link:
-            rpy = OPTICAL_RPY if s["type"] == "camera" else "0 0 0"
-            lines += [
-                f'    <joint name="{_joint(frame)}" type="fixed">',
-                f'      <origin xyz="0 0 0" rpy="{rpy}"/>',
-                f'      <parent link="{link}"/>',
-                f'      <child link="{frame}"/>',
-                "    </joint>",
-                f'    <link name="{frame}"/>',
-            ]
-    lines += ["  </xacro:macro>", "</robot>", ""]
-    return "\n".join(lines)
-
-
-def _joint(link):
-    return link.replace("/", "_") + "_joint"
-
-
-# --- the Isaac rig --------------------------------------------------------------------------
 
 def rig(spec, header, spec_rel):
     center, dims = specmod.box(spec)
@@ -188,95 +114,54 @@ def rig(spec, header, spec_rel):
         "name": spec.name,
         "description": spec.doc.get("description", ""),
         "assumptions": specmod.assumptions(spec),
+        "spec_hash": specmod.spec_hash(spec),
         "body": {"catalogue_model": spec.section("body").get("catalogue_model", ""),
                  "box_center": list(center), "box_dims": list(dims)},
-        "vehicle": specmod.vehicle_params(spec).to_dict(),
+        "vehicle": vehicle_params(spec).to_dict(),
         "sensors": sensors,
     }
-    return _comment(header) + _comment(
+    return emit.comment(header) + emit.comment(
         "The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).\n"
         "Sensor transforms are base_link -> link, translation in m, quaternion w x y z.") \
-        + _yaml(doc)
+        + emit.yaml_text(doc)
 
 
 # --- driver ---------------------------------------------------------------------------------
 
-def outputs(spec_path, root):
-    """{path relative to root: content} for one spec."""
-    root = Path(root).resolve()
-    spec_path = Path(spec_path).resolve()
-    spec = specmod.load(spec_path)
-    try:
-        rel = spec_path.relative_to(root).as_posix()
-    except ValueError:
-        rel = spec_path.name
-    header = HEADER.format(spec=rel)
-    vm = spec.doc["autoware"]["vehicle_model"]
-    sm = spec.doc["autoware"]["sensor_model"]
-    vdesc = f"src/{vm}_launch/{vm}_description"
-    sdesc = f"src/{sm}_launch/{sm}_description"
-    sc = sensors_calibration(spec, header)
-    skc = sensor_kit_calibration(spec, header)
-    return {
-        f"{vdesc}/config/vehicle_info.param.yaml": vehicle_info(spec, header),
-        f"{vdesc}/config/mirror.param.yaml": mirror(spec, header),
-        f"{sdesc}/config/sensors_calibration.yaml": sc,
-        f"{sdesc}/config/sensor_kit_calibration.yaml": skc,
-        f"{sdesc}/urdf/sensor_kit.xacro": sensor_kit_xacro(spec, header),
-        f"src/aib_individual_params/config/default/{sm}/sensors_calibration.yaml": sc,
-        f"src/aib_individual_params/config/default/{sm}/sensor_kit_calibration.yaml": skc,
-        f"src/aib/config/{spec.name}.rig.yaml": rig(spec, header, rel),
-    }
+def outputs(specs=SPECS, root=REPO):
+    """{path relative to root: content} for every spec under `specs`."""
+    out = {}
+    for path in sorted(Path(specs).glob("*.yaml")):
+        spec = specmod.load(path)
+        rel = f"sim_vehicle_spec/vehicles/{path.name}"
+        out[f"src/aib/config/{spec.name}.rig.yaml"] = rig(spec, emit.header(spec, TOOL, rel), rel)
+    return out
 
 
-def stale(spec_path, root):
-    """The outputs whose file differs from what the spec gives (or is missing)."""
-    root = Path(root)
-    return [p for p, text in outputs(spec_path, root).items()
-            if not (root / p).is_file() or (root / p).read_text() != text]
+def stale(specs=SPECS, root=REPO):
+    return emit.stale(outputs(specs, root), root)
 
 
-def write(spec_path, root):
-    root = Path(root)
-    written = []
-    for p, text in outputs(spec_path, root).items():
-        f = root / p
-        if f.is_file() and f.read_text() == text:
-            continue
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(text)
-        written.append(p)
-    return written
-
-
-def default_root(spec_path):
-    """The repository the spec is in: the first parent holding a `src` directory."""
-    for d in Path(spec_path).resolve().parents:
-        if (d / "src").is_dir():
-            return d
-    return Path.cwd()
+def write(specs=SPECS, root=REPO):
+    return emit.write(outputs(specs, root), root)
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="aib vehicle spec generator")
-    ap.add_argument("specs", nargs="+", help="vehicle spec YAML(s)")
-    ap.add_argument("--root", default=None, help="repository root (default: the spec's)")
+    ap = argparse.ArgumentParser(description="the Isaac rig from a vehicle spec")
+    ap.add_argument("--specs", type=Path, default=SPECS)
+    ap.add_argument("--root", type=Path, default=REPO)
     ap.add_argument("--check", action="store_true",
-                    help="write nothing; exit 1 listing the outputs that are stale")
+                    help="write nothing; exit 1 listing the rigs that are stale")
     args = ap.parse_args(argv)
-    bad = 0
-    for s in args.specs:
-        root = Path(args.root) if args.root else default_root(s)
-        if args.check:
-            for p in stale(s, root):
-                print(f"stale: {p} (from {s}); run `just generate`", file=sys.stderr)
-                bad += 1
-        else:
-            for p in write(s, root):
-                print(f"wrote {p}")
     if args.check:
+        bad = stale(args.specs, args.root)
+        for p in bad:
+            print(f"stale: {p}; run `just generate`", file=sys.stderr)
         print("generated files: " + ("STALE" if bad else "up to date"))
-    return 1 if bad else 0
+        return 1 if bad else 0
+    for p in write(args.specs, args.root):
+        print(f"wrote {p}")
+    return 0
 
 
 if __name__ == "__main__":

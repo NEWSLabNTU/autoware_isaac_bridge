@@ -6,7 +6,7 @@ import unittest
 
 _paths = __import__("_paths")  # sys.path, for direct runs
 from aib import powertrain as pt
-from aib import spec as specmod
+from aib import gen
 from aib.control import GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, Command
 from aib.params import G, VehicleParams
 
@@ -316,7 +316,7 @@ class TractionControlTest(unittest.TestCase):
 
 class ShippedSpecEvTest(unittest.TestCase):
     def test_the_shipped_spec_builds_an_ev(self):
-        p = specmod.vehicle_params(specmod.load(_paths.SPEC))
+        p = gen.vehicle_params(gen.specmod.load(_paths.SPEC))
         p.powertrain = "ev"
         m = pt.make(p)
         self.assertEqual(m.name, "ev")

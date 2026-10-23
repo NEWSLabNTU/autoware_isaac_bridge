@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Expand Autoware's vehicle URDF (tier4_vehicle_launch's vehicle.xacro) for aib's vehicle and
-# sensor kit, as robot_state_publisher gets it, and check every sensor link and frame of the
-# rig is in it. Needs Autoware and this workspace's install sourced.
+# Expand Autoware's vehicle URDF (tier4_vehicle_launch's vehicle.xacro) for the rig's car and its
+# sensor kit (autoware_sim_vehicle's packages), as robot_state_publisher gets it, and check
+# every sensor link and frame of the rig is in it. Needs Autoware and this workspace's install
+# sourced.
 set -euo pipefail
 rig=${1:-$(dirname "$0")/../src/aib/config/tesla_model3.rig.yaml}
-vm=${2:-aib_vehicle}
-sm=${3:-aib_sensor_kit}
+vm=${2:-tesla_model3}
+sm=${3:-tesla_model3_sensor_kit}
 top=$(ros2 pkg prefix tier4_vehicle_launch)/share/tier4_vehicle_launch/urdf/vehicle.xacro
 cfg=$(ros2 pkg prefix "${sm}_description")/share/${sm}_description/config
 urdf=$(xacro "$top" vehicle_model:="$vm" sensor_model:="$sm" config_dir:="$cfg")

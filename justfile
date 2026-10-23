@@ -7,7 +7,6 @@ project := justfile_directory()
 autoware_setup := env_var_or_default('AUTOWARE_SETUP', '/opt/autoware/1.5.0/setup.bash')
 # Isaac Sim 6.1's pip install (its venv, its bundled ROS 2 Humble). Environment, not a setting.
 isaac_root := env_var_or_default('ISAAC_ROOT', '/mnt/disk1/isaac-sim')
-specs := project + '/vehicles/*.yaml'
 
 # List available recipes
 default:
@@ -38,20 +37,21 @@ build: _check-setuptools check-generated
     #!/usr/bin/env bash
     set -e
     source "{{autoware_setup}}"
-    # deps/autoware_sim_vehicle (a submodule): the Autoware profile aib_launch includes
-    colcon build --base-paths src deps/autoware_sim_vehicle --symlink-install
+    # deps/ (submodules): the Autoware profile and the car's packages aib_launch includes
+    colcon build --base-paths src deps/autoware_sim_vehicle deps/sim_vehicle_spec --symlink-install
 
 # Remove build artifacts
 clean:
     rm -rf build install log
 
-# Write Autoware's vehicle and sensor kit files and the Isaac rig from the vehicle spec(s)
+# Write the Isaac rig from the vehicle spec(s) in deps/sim_vehicle_spec (a submodule); Autoware's
+# packages for the car are autoware_sim_vehicle's
 generate:
-    PYTHONPATH={{project}}/src/aib python3 -m aib.gen {{specs}}
+    PYTHONPATH={{project}}/src/aib python3 -m aib.gen
 
 # Fail when a generated file is stale (the spec changed, or a generated file was edited)
 check-generated:
-    PYTHONPATH={{project}}/src/aib python3 -m aib.gen {{specs}} --check
+    PYTHONPATH={{project}}/src/aib python3 -m aib.gen --check
 
 # Unit tests (no Isaac, no ROS), the generated-file check, and the URDF check when built
 test: check-generated
