@@ -10,7 +10,8 @@ and steer angle are set directly, every physics step, from the powertrain (`aib.
 and the steering actuator (`aib.control`). The road loads (rolling resistance, aerodynamic
 drag: `aib.powertrain.resistance`) are a force on the body at its centre of mass
 (PhysxForceAPI), set every step from the body's speed. Each step's wheel states (spin,
-longitudinal slip) are read back for the powertrain's ABS and traction control.
+longitudinal slip) are read back for the powertrain's ABS and traction control, and the body's
+yaw rate and sideslip for the stability control (`aib.esc`, off unless the rig enables it).
 
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
@@ -39,6 +40,7 @@ from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
 from .. import powertrain as powertrains
 from ..control import Command, State, ackermann, steer
+from ..esc import Esc
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams
 
@@ -82,6 +84,7 @@ class Vehicle:
         self.path = path
         self.p = p = params
         self.powertrain = powertrains.make(params)
+        self.esc = Esc(params)
         ensure_vehicle_scene(stage)
         root = UsdGeom.Xform.Define(stage, path)
         prim = root.GetPrim()
@@ -229,6 +232,7 @@ class Vehicle:
         self.contacts = None
         self.road_load.Set(Gf.Vec3f(0, 0, 0))
         self.powertrain.reset()
+        self.esc.reset()
 
     # --- Actuation -------------------------------------------------------------------------
 
@@ -241,7 +245,10 @@ class Vehicle:
         else:
             left = right = self.tire_angle
         speed = state.velocity[0]
-        self.torques = self.powertrain.torques(cmd, speed, dt, self.wheel_states)
+        mu = sum(self.friction_values) / len(self.friction_values)
+        esc = self.esc.step(speed, state.angular_velocity[2], state.velocity[1],
+                            self.tire_angle, mu, dt)
+        self.torques = self.powertrain.torques(cmd, speed, dt, self.wheel_states, esc)
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
         for (_, d, b, s), drive, brake, angle in zip(self.wheels, self.torques.drive,
                                                      self.torques.brake, angles):

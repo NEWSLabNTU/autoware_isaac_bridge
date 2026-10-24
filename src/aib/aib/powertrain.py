@@ -95,16 +95,18 @@ def feedforward(p, accel, speed_along):
 
 
 class Powertrain:
-    """The interface: `torques(cmd, speed, dt, wheels=None) -> Torques`. `speed` is the
-    body's forward speed (m/s), `wheels` the four WheelStates of the last step when the host
-    has them (None: none yet, or a host that cannot read them)."""
+    """The interface: `torques(cmd, speed, dt, wheels=None, esc=None) -> Torques`. `speed` is
+    the body's forward speed (m/s), `wheels` the four WheelStates of the last step when the
+    host has them (None: none yet, or a host that cannot read them), `esc` the stability
+    control's request (`aib.esc`), which only `ev` acts on: `ideal` has no brake hydraulics
+    or ABS to put it through."""
 
     name = ""
 
     def __init__(self, params):
         self.p = params
 
-    def torques(self, cmd, speed, dt, wheels=None):  # pragma: no cover - interface
+    def torques(self, cmd, speed, dt, wheels=None, esc=None):  # pragma: no cover - interface
         raise NotImplementedError
 
     def reset(self):
@@ -123,7 +125,7 @@ def _direction(cmd):
 class IdealPowertrain(Powertrain):
     name = "ideal"
 
-    def torques(self, cmd, speed, dt, wheels=None):
+    def torques(self, cmd, speed, dt, wheels=None, esc=None):
         p = self.p
         r = p.wheel_radius
         if _holding(cmd, speed):
@@ -289,7 +291,9 @@ class EvPowertrain(Powertrain):
             wheel = speed / self.p.wheel_radius
         return wheel * self.p.gear_ratio
 
-    def torques(self, cmd, speed, dt, wheels=None):
+    def torques(self, cmd, speed, dt, wheels=None, esc=None):
+        """`esc`: an `aib.esc.EscOut` of this step, its brake added to each wheel's ahead of
+        ABS and its factor on the motor's torque."""
         p = self.p
         r, ratio = p.wheel_radius, p.gear_ratio
         direction = _direction(cmd)
@@ -328,6 +332,8 @@ class EvPowertrain(Powertrain):
         self.motor_torque = lag(self.motor_torque, request, dt, p.motor_time_constant)
         self.motor_torque = max(-limit, min(limit, self.motor_torque))
         delivered = self.motor_torque
+        if esc is not None and delivered > 0:
+            delivered *= esc.motor_factor
         # Traction control: a driven wheel spinning past its slip limit cuts motor torque.
         if wheels and p.tc_enabled and delivered > 0:
             spin = max(direction * w.slip for w, d in zip(wheels, self.driven) if d)
@@ -348,7 +354,7 @@ class EvPowertrain(Powertrain):
                   and abs(speed) > p.abs_min_speed)
         brake = []
         for i in range(4):
-            pressure = self.pressure[0 if IS_FRONT[i] else 1]
+            pressure = self.pressure[0 if IS_FRONT[i] else 1] + (esc.brake[i] if esc else 0.0)
             lock = -direction * wheels[i].slip if wheels else 0.0
             braking = pressure > 1.0 or (self.driven[i] and self.motor_torque < 0)
             factor = self.abs[i].step(lock, dt, enabled=abs_on and braking)
@@ -356,7 +362,8 @@ class EvPowertrain(Powertrain):
         self.debug = {"motor_torque": self.motor_torque, "delivered": delivered,
                       "motor_limit": limit, "omega": omega, "regen_force": regen_force,
                       "friction_request": friction, "pressure": tuple(self.pressure),
-                      "abs": tuple(m.factor for m in self.abs), "tc": self.tc.factor}
+                      "abs": tuple(m.factor for m in self.abs), "tc": self.tc.factor,
+                      "esc": esc and (tuple(round(b) for b in esc.brake), esc.motor_factor)}
         return Torques(drive, tuple(brake))
 
     def split_friction(self, brake, regen, decel):

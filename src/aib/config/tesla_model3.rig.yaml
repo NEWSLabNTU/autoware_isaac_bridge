@@ -63,6 +63,18 @@ vehicle:
   tc_slip_reapply: 0.15
   tc_release_rate: 20.0
   tc_apply_rate: 5.0
+  esc_enabled: false
+  esc_min_speed: 3.0
+  esc_understeer: 0.0
+  esc_target_margin: 0.85
+  esc_dead_band: 0.035
+  esc_dead_band_share: 0.1
+  esc_gain: 12000.0
+  esc_sideslip_limit: 0.07
+  esc_sideslip_gain: 30000.0
+  esc_max_brake_torque: 2000.0
+  esc_motor_cut_rate: 5.0
+  esc_motor_restore_rate: 1.0
   rolling_coefficient: 0.0095
   drag_coefficient: 0.23
   frontal_area: 2.2

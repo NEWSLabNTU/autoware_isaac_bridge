@@ -75,6 +75,19 @@ class VehicleParams:
     tc_slip_reapply: float = 0.15
     tc_release_rate: float = 20.0  # 1/s, of the motor torque factor
     tc_apply_rate: float = 5.0  # 1/s
+    # Stability control (aib.esc): one wheel's brake against a yaw rate the tires cannot hold
+    esc_enabled: bool = False
+    esc_min_speed: float = 3.0  # m/s: off below
+    esc_understeer: float = 0.0  # s^2/m^2, the target's understeer: r = v tan(d) / (L (1 + K v^2))
+    esc_target_margin: float = 0.85  # the target capped at this share of mu g / v
+    esc_dead_band: float = 0.035  # rad/s
+    esc_dead_band_share: float = 0.1  # of the target yaw rate, added to the dead band
+    esc_gain: float = 12000.0  # N m of yaw moment per rad/s of yaw rate error
+    esc_sideslip_limit: float = 0.07  # rad
+    esc_sideslip_gain: float = 30000.0  # N m per rad of sideslip past the limit
+    esc_max_brake_torque: float = 2000.0  # N m on the one wheel
+    esc_motor_cut_rate: float = 5.0  # 1/s, of the motor torque factor, against oversteer
+    esc_motor_restore_rate: float = 1.0  # 1/s
     # Road loads, applied to the body as a force (all models)
     rolling_coefficient: float = 0.0095  # Crr
     drag_coefficient: float = 0.23  # Cd

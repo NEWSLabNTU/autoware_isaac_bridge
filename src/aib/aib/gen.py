@@ -10,6 +10,7 @@ writes only what is aib's: `src/aib/config/<name>.rig.yaml`, whose `vehicle` is 
 parameter schema (aib.params.VehicleParams). Every rig names its spec and spec_hash.
 """
 import argparse
+from dataclasses import fields
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def vehicle_params(spec):
     b, p = d["brakes"], d["powertrain"]
     rs = d.get("resistance")
     abs_ = b.get("abs") or {}
+    esc = b.get("esc") or {}
     tc = p.get("traction_control") or {}
     st, su = spec.section("steering"), d["suspension"]
     px = spec.section("isaac").get("physx") or {}
@@ -67,6 +69,11 @@ def vehicle_params(spec):
                        ("slip_reapply", "abs_slip_reapply"), ("release_rate", "abs_release_rate"),
                        ("apply_rate", "abs_apply_rate"), ("min_speed", "abs_min_speed")):
         values[field] = abs_.get(key, getattr(base, field))
+    # The stability control (aib.esc): a spec's brakes.esc, by the field's name without
+    # its esc_ prefix; off when the spec has none.
+    for f in fields(VehicleParams):
+        if f.name.startswith("esc_"):
+            values[f.name] = esc.get(f.name[4:], getattr(base, f.name))
     for key in ("drive_axle", "front_drive_share", "gear_ratio", "motor_peak_torque",
                 "motor_peak_power", "motor_max_rpm", "motor_time_constant", "regen_max_torque",
                 "regen_max_power"):
