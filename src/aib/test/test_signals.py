@@ -1,4 +1,4 @@
-import _paths  # noqa: F401 - puts aib on the path
+__import__("_paths")  # sys.path, for direct runs
 
 from aib import signals
 

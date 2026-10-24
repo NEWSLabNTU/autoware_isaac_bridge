@@ -1,7 +1,7 @@
 """Simulation time: the integer every part of a run computes (roadmap 051). Pure."""
 import unittest
 
-import _paths  # noqa: F401  sys.path
+__import__("_paths")  # sys.path, for direct runs
 from aib.sim_time import BASE_NS, nanos, sim_ns
 
 # swb_world_protocol's sim_time table (and acb's clock.rs), case for case.
