@@ -9,6 +9,7 @@ GNSS are computed from the vehicle's state (`aib.sensing`); the lidar and camera
 import array
 import logging
 
+from ..frames import advance, compose
 from ..sensing import (APERTURE_MM, USD_CAMERA_IN_LINK, Periodic, gnss_reading, imu_reading,
                        pack_cloud)
 
@@ -25,14 +26,39 @@ def _mount(stage, path, transform):
     return x
 
 
+# The lidars: beside the vehicles, not under them (`Lidar`)
+SENSORS = "/World/aib_sensors"
+
+
+def _pose_after(vehicle, state, dt):
+    """Where `vehicle`'s base_link will be after a substep of `dt`: its body after the last
+    substep moved on at its velocities, or its pose as set (a spawn, a teleport) before the
+    first."""
+    if vehicle.last is not None:
+        pos, q, vel = vehicle.last
+        return advance((pos, q), vel, state.angular_velocity, dt)
+    t, q = vehicle.translate.Get(), vehicle.orient.Get()
+    return (tuple(t), (q.GetReal(), *q.GetImaginary()))
+
+
 class Lidar:
     """An RTX lidar. Its scan goes out one frame late with its own stamp: sent in the same
     instant as `/clock` of its own frame, a scan races the EKF pose of that stamp to
     ndt_scan_matcher, whose pose buffer then cannot interpolate ("Couldn't interpolate
     pose" -> localization not OK -> MRM for a cycle, csb roadmap 038). On CARLA the scan
-    arrives after the tick's /clock; on a vehicle, 50-100 ms after capture."""
+    arrives after the tick's /clock; on a vehicle, 50-100 ms after capture.
+
+    The lidar is not under its vehicle. Isaac never gives back what an RTX lidar's render
+    product cost (~105 MB): not destroyed, not paused, not pointed at a lidar at a new path
+    (csb docs/issues/003); and pointing a kept product at a new lidar prim at the old path,
+    which does give it back, once hung csb's world server's renderer. So a lidar prim and its
+    render product are made once per vehicle path and sensor, under `SENSORS`, and kept for
+    the next vehicle at that path (csb's world server spawns its egos at the same paths).
+    Before each substep the host calls `before_substep`, which puts the lidar where its mount
+    will be after that substep."""
 
     renders = True
+    kept = {}  # its mount's prim path -> (lidar prim path, render product, annotator, ops)
 
     def __init__(self, rig, ros, stage, vehicle_path):
         import omni.replicator.core as rep
@@ -40,19 +66,37 @@ class Lidar:
 
         self.rig, self.ros = rig, ros
         slug = rig.name.replace("/", "_")
-        _mount(stage, f"{vehicle_path}/{slug}_mount", rig.transform)
-        lidar = RtxLidar.create(f"{vehicle_path}/{slug}_mount/lidar",
-                                config=rig.isaac.get("config", "OS1"),
-                                variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"))
-        self.render_product = rep.create.render_product(lidar.paths[0], resolution=(128, 128))
-        self.annotator = rep.AnnotatorRegistry.get_annotator("IsaacExtractRTXSensorPointCloud")
-        self.annotator.attach([self.render_product.path])
+        root = f"{SENSORS}/{vehicle_path.strip('/').replace('/', '_')}_{slug}"
+        kept = Lidar.kept.get(root)
+        # The annotator holds the frame the last vehicle's lidar saw: two renders of its own
+        self.fresh = 2
+        if kept is None or not stage.GetPrimAtPath(kept[0]):
+            ops = _mount(stage, root, rig.transform).GetOrderedXformOps()
+            lidar = RtxLidar.create(f"{root}/lidar", config=rig.isaac.get("config", "OS1"),
+                                    variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"))
+            rp = rep.create.render_product(lidar.paths[0], resolution=(128, 128))
+            annotator = rep.AnnotatorRegistry.get_annotator("IsaacExtractRTXSensorPointCloud")
+            annotator.attach([rp.path])
+            kept = Lidar.kept[root] = (lidar.paths[0], rp, annotator, ops)
+            self.fresh = 0
+        path, self.render_product, self.annotator, (self.translate, self.orient) = kept
         self.channels = int(rig.extra.get("channels", 128))
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
-        log.info("lidar %s: %s at %s in base_link", rig.name, lidar.paths[0], rig.translation)
+        log.info("lidar %s: %s at %s in base_link%s", rig.name, path, rig.translation,
+                 " (kept from the last vehicle at this path)" if self.fresh else "")
+
+    def before_substep(self, vehicle, state, dt):
+        from pxr import Gf
+
+        (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.rig.transform)
+        self.translate.Set(Gf.Vec3d(x, y, z))
+        self.orient.Set(Gf.Quatd(*q))
 
     def ready(self):
+        if self.fresh > 0:
+            self.fresh -= 1
+            return False
         d = self.annotator.get_data()
         return isinstance(d, dict) and len(d.get("data", [])) > 0
 
@@ -90,11 +134,7 @@ class Lidar:
         return msg
 
     def close(self):
-        try:
-            self.annotator.detach([self.render_product.path])
-            self.render_product.destroy()
-        except Exception:  # noqa: BLE001 - the stage is going anyway
-            log.exception("lidar %s teardown", self.rig.name)
+        """Nothing to tear down: the lidar stays, live, for the next vehicle at this path."""
 
 
 class Camera:
@@ -160,6 +200,9 @@ class Camera:
         info.p = [self.k[0], 0.0, self.k[2], 0.0, 0.0, self.k[4], self.k[5], 0.0, 0.0, 0.0, 1.0, 0.0]
         self.info_pub.publish(info)
 
+    def before_substep(self, vehicle, state, dt):
+        pass  # under the vehicle: PhysX moves it
+
     def close(self):
         try:
             self.annotator.detach([self.render_product.path])
@@ -193,6 +236,9 @@ class Imu:
         msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = (float(c) for c in acc)
         self.pub.publish(msg)
 
+    def before_substep(self, vehicle, state, dt):
+        pass  # read from the vehicle's state
+
     def close(self):
         pass
 
@@ -222,6 +268,9 @@ class Gnss:
         msg.latitude, msg.longitude, msg.altitude = lat, lon, alt
         msg.position_covariance_type = 0
         self.pub.publish(msg)
+
+    def before_substep(self, vehicle, state, dt):
+        pass  # read from the vehicle's state
 
     def close(self):
         pass

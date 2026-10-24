@@ -16,6 +16,18 @@ def close(a, b, tol=1e-9):
 
 
 class FramesTest(unittest.TestCase):
+    def test_advance_is_the_inverse_of_the_vehicles_sampling(self):
+        # aib.isaac.vehicle.Vehicle.sample: omega from qconj(q0) * q1 over dt, body frame
+        q0 = frames.rpy_quat(0.02, -0.01, 1.2)
+        dt, omega, vel = 1 / 60, (0.1, -0.3, 0.5), (3.0, -1.0, 0.2)
+        (t, q1) = frames.advance(((1.0, 2.0, 0.5), q0), vel, omega, dt)
+        self.assertTrue(close(t, (1.05, 2.0 - 1 / 60, 0.5 + 0.2 / 60)))
+        dq = frames.qmul(frames.qconj(q0), q1)
+        s = math.sqrt(sum(c * c for c in dq[1:]))
+        back = tuple(c / s * 2 * math.atan2(s, dq[0]) / dt for c in dq[1:])
+        self.assertTrue(close(back, omega, 1e-9))
+        self.assertEqual(frames.advance(((0, 0, 0), q0), (0, 0, 0), (0, 0, 0), dt)[1], q0)
+
     def test_rpy_is_urdf_order(self):
         q = frames.rpy_quat(math.pi / 2, 0.0, math.pi / 2)
         self.assertTrue(close(frames.qrot(q, (1, 0, 0)), (0, 1, 0)))

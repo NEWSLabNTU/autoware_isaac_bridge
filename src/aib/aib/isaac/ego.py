@@ -42,6 +42,8 @@ class Ego:
         self.state = State()
         self.sensors = [sensor_kinds.make(s, ros, stage, path)
                         for s in rig.sensors.values() if s.enabled]
+        for s in self.sensors:
+            s.before_substep(self.vehicle, self.state, 0.0)
         ros.reset()
 
     @property
@@ -70,6 +72,8 @@ class Ego:
 
     def before_substep(self, dt):
         self.vehicle.apply(self.ros.cmd, dt, self.state)
+        for s in self.sensors:
+            s.before_substep(self.vehicle, self.state, dt)
 
     def after_substep(self, physx, dt):
         self.vehicle.sample(physx, dt, self.state)

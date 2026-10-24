@@ -41,6 +41,17 @@ def compose(a, b):
     return (tuple(x + y for x, y in zip(ta, r)), qmul(qa, qb))
 
 
+def advance(pose, velocity, angular_velocity, dt):
+    """`pose` (translation, quaternion) moved on for `dt` s at `velocity` (world frame, m/s)
+    and `angular_velocity` (body frame, rad/s): where a body will be after a step."""
+    (t, q) = pose
+    wx, wy, wz = (c * dt for c in angular_velocity)
+    a = math.sqrt(wx * wx + wy * wy + wz * wz)
+    dq = (1.0, 0.0, 0.0, 0.0) if a < 1e-12 else \
+        (math.cos(a / 2), *(c / a * math.sin(a / 2) for c in (wx, wy, wz)))
+    return (tuple(x + v * dt for x, v in zip(t, velocity)), qmul(q, dq))
+
+
 def mount_transform(m):
     """A calibration entry ({x, y, z, roll, pitch, yaw}) as (translation, quaternion)."""
     return ((float(m["x"]), float(m["y"]), float(m["z"])),
