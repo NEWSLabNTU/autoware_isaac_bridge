@@ -230,7 +230,15 @@ a steering sweep against the bicycle model). PASS or FAIL, with `report.json`.
 
 `aib.runner` (`just isaac-ego`) is the smallest host: Isaac Sim, a world (a USD stage with
 its own colliders, or a ground plane), one ego at a pose, fixed frames forever. It is what
-acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs,
-no traffic lights, no scenario protocol: those are swb_isaac_world's. (A host that has
-signals hands them to `EgoRos.publish_signals` each frame, which publishes them to Autoware
-as acb does; swb_isaac_world does, scenario-world-bridge roadmap 044.)
+acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs
+and no scenario protocol: those are swb_isaac_world's. A host that has signals hands them to
+`EgoRos.publish_signals` each frame, which publishes them to Autoware as acb does
+(swb_isaac_world sends SSv2's, scenario-world-bridge roadmap 044). The runner has none
+commanded, so with `signals:=<map dir>` it runs CARLA's own cycle (`aib.signals.Cycle`): the
+lights of a junction, CARLA's light group, turn green one at a time, 10 s green and 3 s amber
+each (`green_s:=`, `amber_s:=`), the rest red, every group from sim time 0. The groups are
+CARLA's, written once per town into `<map dir>/carla/signal_groups.yaml` by
+scenario-world-bridge's `scripts/generate_signal_groups.py` (CARLA holding the town); which
+regulatory elements a light is comes from the map's signal table, as for acb. Only the V2X
+input moves: a world's lamp prims stay as they are. Without `signals:=`, nothing publishes,
+and Autoware stops at every signalised stop line with its light unknown.

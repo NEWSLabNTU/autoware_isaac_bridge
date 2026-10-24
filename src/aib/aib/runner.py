@@ -2,6 +2,7 @@
 
     python -m aib.runner --ego config/ego.yaml [--world <usd>] [--pose x,y,z,yaw]
         [--frame-rate 20] [--physics-dt 0.016667] [--display :8] [--realtime] [--duration s]
+        [--signals <map dir> [--green-s 10] [--amber-s 3]]
 
 Run it through `just isaac-ego` (Isaac's environment: scripts/isaac_env.sh). It starts Isaac
 Sim (headless unless `--display`), loads the world (a USD stage with its own colliders; no
@@ -13,6 +14,13 @@ Autoware on the same domain: `just autoware` (aib_launch isaac_simulator.launch.
 
 `--realtime` paces frames to the wall clock; without it the world runs as fast as it can,
 which Autoware follows through `/clock`.
+
+`--signals <map dir>` gives the ego traffic lights: with no SSv2 to command them, they cycle
+as CARLA's do (`aib.signals.Cycle`: a junction's lights green in turn, `--green-s` then
+`--amber-s` each, the rest red), from the map dir's signal table and CARLA's groups
+(`carla/signal_groups.yaml`), and reach Autoware over V2X every frame, as swb's world server
+sends SSv2's. Without it nothing publishes signals, and Autoware stops at every signalised
+stop line, its light unknown.
 """
 import argparse
 import logging
@@ -42,6 +50,10 @@ def main(argv=None):
     ap.add_argument("--display", default="", help="X display for a window; empty: headless")
     ap.add_argument("--realtime", action="store_true", help="pace frames to the wall clock")
     ap.add_argument("--duration", type=float, default=0.0, help="stop after this much sim time")
+    ap.add_argument("--signals", default="",
+                    help="map dir whose traffic lights to cycle and publish; empty: none")
+    ap.add_argument("--green-s", type=float, default=10.0, help="each light's green time (s)")
+    ap.add_argument("--amber-s", type=float, default=3.0, help="each light's amber time (s)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -50,6 +62,14 @@ def main(argv=None):
     from .rig import EgoConfig
 
     cfg = EgoConfig.load(args.ego)
+    cycle = None
+    if args.signals:
+        from .signals import Cycle
+
+        cycle = Cycle.from_map_dir(args.signals, args.green_s, args.amber_s)
+        log.info("signals: %d light group(s), %d regulatory element(s) from %s, %.1f s green "
+                 "and %.1f s amber", len(cycle.groups), len(cycle.groups_at(0.0)),
+                 args.signals, args.green_s, args.amber_s)
     rig = cfg.load_rig()
     substeps = max(1, round(1.0 / (args.frame_rate * args.physics_dt)))
     dt = 1.0 / (args.frame_rate * substeps)
@@ -127,6 +147,8 @@ def main(argv=None):
             frame += 1
             stamp = ros.publish_clock(sim_time)
             ego.publish(sim_time, stamp)
+            if cycle is not None:
+                ros.publish_signals(cycle.groups_at(sim_time), stamp)
             if args.duration and sim_time >= args.duration:
                 break
             if args.realtime:

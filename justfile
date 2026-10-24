@@ -84,6 +84,9 @@ check: test
 #   pose:=x,y,z,yaw  base_link's start in the world (default 0,0,0.05,0)
 #   realtime:=true   pace frames to the wall clock
 #   duration:=<s>    stop after this much sim time
+#   signals:=<map dir>   cycle that map's traffic lights as CARLA does and publish them to
+#                    Autoware (needs <map dir>/carla/signal_groups.yaml); green_s:=, amber_s:=
+#                    (default 10, 3); none: Autoware stops at every signalised stop line
 # A window opens on $DISPLAY when set (ISAAC_HEADLESS=1 forces headless); DDS as the ego
 # stack's (CYCLONEDDS_URI / RMW_IMPLEMENTATION pass through).
 [positional-arguments]
@@ -99,6 +102,10 @@ isaac-ego *args:
             realtime:=true) extra+=(--realtime) ;;
             realtime:=*) ;;
             duration:=*) extra+=(--duration "${a#duration:=}") ;;
+            signals:=?*) extra+=(--signals "${a#signals:=}") ;;
+            signals:=) ;;
+            green_s:=*) extra+=(--green-s "${a#green_s:=}") ;;
+            amber_s:=*) extra+=(--amber-s "${a#amber_s:=}") ;;
             *) echo "unknown argument $a" >&2; exit 2 ;;
         esac
     done

@@ -63,7 +63,8 @@ Drive it, standalone (no scenario runner):
 
 ```bash
 # terminal 1: the Isaac side -- the world, the ego, its sensors and vehicle interface
-DISPLAY=:8 just isaac-ego world:=/path/to/Town01_physics.usda pose:=x,y,z,yaw
+DISPLAY=:8 just isaac-ego world:=/path/to/Town01_physics.usda pose:=x,y,z,yaw \
+    signals:=/path/to/maps/Town01
 # terminal 2: Autoware on the ego's domain (1)
 ROS_DOMAIN_ID=1 just autoware map_path:=/path/to/maps/Town01
 # terminal 3: drive to a goal (or set one in RViz)
@@ -73,6 +74,14 @@ ROS_DOMAIN_ID=1 ros2 run autoware_sim_pilot auto_drive --ros-args -p poses_file:
 Without `world:=` the ego stands on a flat ground plane, which is enough to check the
 vehicle and sensors but not to localize against a map. `isaac-ego` also takes `ego:=<yaml>`
 (default `src/aib/config/ego.yaml`), `realtime:=true` and `duration:=<s>`.
+
+`signals:=<map dir>` gives the drive traffic lights: nothing commands them without a
+scenario, so the runner cycles them as CARLA does, a junction's lights green in turn (10 s
+green, 3 s amber: `green_s:=`, `amber_s:=`), and publishes them to Autoware over V2X. It needs
+CARLA's light groups in `<map dir>/carla/signal_groups.yaml`, written once per town from
+CARLA holding it by scenario-world-bridge's `scripts/generate_signal_groups.py <Town> --map
+<map dir> --port <CARLA port>`. Without `signals:=` Autoware stops at every signalised stop
+line, its light unknown (docs/design.md, Standalone runner).
 
 `just autoware` passes every `name:=value` to the profile, after its `check_launch_args`
 refuses the arguments roadmap 051 renamed (`carla_control:=`, ... are now `sim_control:=`,
