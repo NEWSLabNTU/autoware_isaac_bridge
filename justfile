@@ -145,9 +145,13 @@ vehicle-check *args:
     setsid env -u DISPLAY ISAAC_HEADLESS=1 just --justfile "{{justfile()}}" isaac-ego ego:="$ego" \
         realtime:=true > "$out/runner.log" 2>&1 < /dev/null &
     runner=$!; groups+=($runner)
+    # Autoware's setup.bash replaces CYCLONEDDS_URI when loopback multicast is on; keep the
+    # caller's, the Isaac ego's, or the check never discovers it (scenario-world-bridge issue 008).
+    dds_uri="${CYCLONEDDS_URI:-}"
     source "{{autoware_setup}}"; source "{{project}}/install/setup.bash"
+    if [ -n "$dds_uri" ]; then export CYCLONEDDS_URI="$dds_uri"; fi
     echo "[vehicle-check] waiting for the Isaac ego (domain $ROS_DOMAIN_ID)"
-    until timeout 10 ros2 topic echo --once /vehicle/status/velocity_status > /dev/null 2>&1; do
+    until timeout 20 ros2 topic echo --no-daemon --once /vehicle/status/velocity_status > /dev/null 2>&1; do
         kill -0 $runner 2>/dev/null || { echo "[vehicle-check] the runner exited; see $out/runner.log" >&2; exit 1; }
         sleep 5
     done
