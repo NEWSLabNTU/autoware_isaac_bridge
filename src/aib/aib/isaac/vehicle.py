@@ -12,8 +12,8 @@ power steering; roadmap 055), which see only what the car's own sensors read: th
 speeds and the body's yaw rate and accelerations. The linkage splits their tire angle into
 Ackermann angles (`aib.control`). The road loads (rolling resistance, aerodynamic drag:
 `aib.params.road_load`) are a force on the body at its centre of mass (PhysxForceAPI), set
-every step from the body's speed. Each step's wheel states (spin, longitudinal slip, contact)
-are read back for the sensors and the host's surface layer.
+every step from the body's speed. Each step's wheel states (spin, both slips, the tire's
+force, contact) are read back for the sensors and the host's surface layer.
 
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
@@ -22,7 +22,9 @@ surface map (swb's surface layer, roadmap 047) writes it every substep from the 
 ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
 inputs of swb's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
-host's to apply through the same friction value. The tables live outside the vehicle and stay
+host's to apply through the same friction value. The tire's stiffness, sideways and
+lengthways, does take while playing (054 step 1): a host scales it per wheel
+(`set_wheel_stiffness`) so the force peaks at its ground's own slip (054 T1). The tables live outside the vehicle and stay
 when it goes: PhysX refuses to remove a tire friction table while the simulation plays
 ("removing tire friction tables while playing is not permitted"), so one under the vehicle
 failed at every despawn; a vehicle spawned again at the same path takes its tables back.
@@ -35,6 +37,9 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
                                         VEHICLE_WHEEL_STATE_IS_ON_GROUND,
                                         VEHICLE_WHEEL_STATE_ROTATION_SPEED,
                                         VEHICLE_WHEEL_STATE_SUSPENSION_FORCE,
+                                        VEHICLE_WHEEL_STATE_TIRE_FORCE,
+                                        VEHICLE_WHEEL_STATE_TIRE_LATERAL_DIRECTION,
+                                        VEHICLE_WHEEL_STATE_TIRE_LATERAL_SLIP,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP)
 from omni.physx.scripts.utils import set_custom_metadata
@@ -50,6 +55,7 @@ use("sim_vehicle_ecu")
 from sim_vehicle_ecu import Calibration, Ecu, Request, Sensors  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
+STIFFNESS_STEP = 0.02  # a stiffness share closer than this to the one written is not written
 TIRE_FRICTION = "/World/vehicleTireFriction"
 WHEELS = (("frontLeft", True, 1), ("frontRight", True, -1), ("rearLeft", False, 1),
           ("rearRight", False, -1))
@@ -61,6 +67,8 @@ class WheelState(NamedTuple):
     rotation_speed: float = 0.0  # rad/s, positive rolling forward
     slip: float = 0.0  # longitudinal slip: + the wheel spins faster than the road, - slower
     on_ground: bool = True
+    slip_angle: float = 0.0  # rad, PhysX's lateral slip: the contact's velocity off the wheel
+    force: tuple = (0.0, 0.0)  # the tire's force on the ground, N: (along, across) the wheel
 
 
 class Contact(NamedTuple):
@@ -151,6 +159,9 @@ class Vehicle:
         self.contacts = None  # Contact per wheel, after a step
         self.friction = []  # each wheel's table's defaultFrictionValue attribute
         self.friction_values = [p.tire_friction] * len(WHEELS)
+        self.tires = []  # each wheel's PhysxVehicleTireAPI
+        self.tire_base = []  # each wheel's rig (lateral graph (x, y), longitudinal) stiffness
+        self.stiffness_values = [(1.0, 1.0)] * len(WHEELS)  # shares of tire_base, as written
         for i, (name, is_front, side) in enumerate(WHEELS):
             x, y = (L if is_front else 0.0), side * half_t
             sprung, k, c = front_axle if is_front else rear_axle
@@ -173,6 +184,9 @@ class Vehicle:
                 Gf.Vec2f(p.lat_stiff_max_load, p.lat_stiff_value * rest_load))
             tire.CreateLongitudinalStiffnessAttr(p.long_stiff_value * G)
             tire.CreateCamberStiffnessAttr(0.0)
+            self.tires.append(tire)
+            self.tire_base.append(((p.lat_stiff_max_load, p.lat_stiff_value * rest_load),
+                                   p.long_stiff_value * G))
             tire.CreateFrictionVsSlipGraphAttr([Gf.Vec2f(*pt) for pt in p.friction_vs_slip])
             table = PhysxSchema.PhysxVehicleTireFrictionTable.Define(
                 stage, f"{TIRE_FRICTION}/{path.strip('/').replace('/', '_')}/{name}")
@@ -278,6 +292,20 @@ class Vehicle:
         return Sensors(tuple(w.rotation_speed for w in self.wheel_states),
                        state.angular_velocity[2], state.acceleration[0], state.acceleration[1])
 
+    def set_wheel_stiffness(self, i, lateral, longitudinal):
+        """Wheel `i`'s tire stiffness from the next step on, as shares of the rig's: the lateral
+        stiffness graph's value and the longitudinal stiffness. Written only when either moves
+        by more than STIFFNESS_STEP of itself, so a host may call it every substep."""
+        last = self.stiffness_values[i]
+        if all(abs(new / old - 1.0) <= STIFFNESS_STEP for new, old in
+               zip((lateral, longitudinal), last)):
+            return
+        tire = self.tires[i]
+        (x, y), long_base = self.tire_base[i]
+        tire.GetLateralStiffnessGraphAttr().Set(Gf.Vec2f(x, y * float(lateral)))
+        tire.GetLongitudinalStiffnessAttr().Set(long_base * float(longitudinal))
+        self.stiffness_values[i] = (lateral, longitudinal)
+
     def set_wheel_friction(self, i, mu):
         """Wheel `i`'s (WHEELS order) friction from the next step on; written only when it
         changes, so a host may call it every substep."""
@@ -299,10 +327,13 @@ class Vehicle:
             if not w:
                 return None, None
             on_ground = bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])
+            f = w[VEHICLE_WHEEL_STATE_TIRE_FORCE]
             out.append(WheelState(
                 float(w[VEHICLE_WHEEL_STATE_ROTATION_SPEED]),
                 float(w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP]),
-                on_ground))
+                on_ground, float(w[VEHICLE_WHEEL_STATE_TIRE_LATERAL_SLIP]),
+                (_dot(f, w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION]),
+                 _dot(f, w[VEHICLE_WHEEL_STATE_TIRE_LATERAL_DIRECTION]))))
             if on_ground:
                 f = w[VEHICLE_WHEEL_STATE_SUSPENSION_FORCE]
                 contacts.append(Contact(
@@ -342,3 +373,7 @@ class Vehicle:
         state.angular_velocity = omega
         state.acceleration = acc
         state.tire_angle = self.tire_angle
+
+
+def _dot(a, b):
+    return sum(float(x) * float(y) for x, y in zip(a, b))
