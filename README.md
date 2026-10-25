@@ -20,7 +20,8 @@ itself. Every generated file names the spec's `spec_hash`.
 |---|---|
 | `deps/sim_vehicle_spec/` | The vehicle specs (submodule): geometry, mass and centre of mass, wheels, tires, brakes, powertrain, steering, suspension, PhysX settings (`isaac.physx`), sensor mounts and intrinsics, and where each number comes from (its `docs/spec-format.md`) |
 | `deps/autoware_sim_vehicle/` | Autoware's packages per car and the Autoware profile (submodule) |
-| `src/aib/` | The Python library. Pure (no Isaac, no ROS): the rig generator (`aib.gen`), the vehicle parameters, the powertrain seam, the steering, sensor maths, simulation time (`aib.sim_time`). `aib.ros`: Autoware's vehicle interface and the sensor topics (rclpy). `aib.isaac`: the PhysX vehicle, the RTX lidar, camera, IMU and GNSS, and the `Ego` that ties them to a world. `aib.runner`: one ego in an Isaac world, standalone. `aib.steptest`: open-loop step tests of the vehicle in Isaac |
+| `deps/sim_vehicle_ecu/` | The car's onboard computers (submodule): the drive unit's controller, the brake module (EBD, ABS, traction control, ESC) and the power steering, on the car's own sensors; `aib.isaac.vehicle` steps them every physics step |
+| `src/aib/` | The Python library. Pure (no Isaac, no ROS): the rig generator (`aib.gen`), the PhysX vehicle's parameters, the steering linkage, sensor maths, simulation time (`aib.sim_time`). `aib.ros`: Autoware's vehicle interface and the sensor topics (rclpy). `aib.isaac`: the PhysX vehicle, the RTX lidar, camera, IMU and GNSS, and the `Ego` that ties them to a world. `aib.runner`: one ego in an Isaac world, standalone. `aib.steptest`: open-loop step tests of the vehicle in Isaac |
 | `src/aib/config/` | `tesla_model3.rig.yaml`, the Isaac rig (generated from the spec: do not edit), and `ego.yaml`, an ego run of it (the rig, the ROS domain, the node name, hand overrides) |
 | `src/aib_launch/` | `isaac_simulator.launch.xml`: Autoware for the Isaac ego. It is autoware_sim_vehicle's profile with nothing added (`vehicle_model:=tesla_model3`, `sensor_model:=tesla_model3_sensor_kit`) |
 
@@ -48,7 +49,7 @@ itself. Every generated file names the spec's `spec_hash`.
 
 Prerequisites: Ubuntu 22.04, ROS 2 Humble, Autoware 1.5.0 (`/opt/autoware/1.5.0`), Isaac Sim
 6.1 installed with pip into a venv (`ISAAC_ROOT`, default `/mnt/disk1/isaac-sim`), and
-`git submodule update --init --recursive` for `deps/sim_vehicle_spec` and
+`git submodule update --init --recursive` for `deps/sim_vehicle_spec`, `deps/sim_vehicle_ecu` and
 `deps/autoware_sim_vehicle` (the spec; the car's Autoware packages, the profile, the pilot and
 the vehicle check, which `just build` builds).
 
@@ -146,7 +147,7 @@ fail; a unit test checks the rig places the car and every sensor as Autoware's p
 
 ## Documentation
 
-- [docs/design.md](docs/design.md) -- the pieces, the frame loop, time, the SSoT flow, the powertrain seam
+- [docs/design.md](docs/design.md) -- the pieces, the frame loop, time, the SSoT flow, the onboard computers
 - [docs/issues/](docs/issues/) -- defects found, how they were confirmed, their fixes
 - sim_vehicle_spec's `docs/spec-format.md` -- the vehicle spec, key by key
 

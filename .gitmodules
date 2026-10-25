@@ -6,3 +6,7 @@
 	path = deps/sim_vehicle_spec
 	url = https://github.com/NEWSLabNTU/sim_vehicle_spec.git
 	branch = main
+[submodule "deps/sim_vehicle_ecu"]
+	path = deps/sim_vehicle_ecu
+	url = https://github.com/NEWSLabNTU/sim_vehicle_ecu.git
+	branch = main

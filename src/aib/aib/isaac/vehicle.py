@@ -6,12 +6,14 @@ expects. Geometry and physics are the rig's `VehicleParams` (generated from the 
 spec), the suspension tuned per axle to one frequency so the car sits level.
 
 PhysX drives it with no engine model ("drive none"): each wheel's drive torque, brake torque
-and steer angle are set directly, every physics step, from the powertrain (`aib.powertrain`)
-and the steering actuator (`aib.control`). The road loads (rolling resistance, aerodynamic
-drag: `aib.powertrain.resistance`) are a force on the body at its centre of mass
-(PhysxForceAPI), set every step from the body's speed. Each step's wheel states (spin,
-longitudinal slip) are read back for the powertrain's ABS and traction control, and the body's
-yaw rate and sideslip for the stability control (`aib.esc`, off unless the rig enables it).
+and steer angle are set directly, every physics step, from the car's onboard computers
+(`sim_vehicle_ecu`: the drive unit, the brake module with ABS, traction control and ESC, the
+power steering; roadmap 055), which see only what the car's own sensors read: the four wheel
+speeds and the body's yaw rate and accelerations. The linkage splits their tire angle into
+Ackermann angles (`aib.control`). The road loads (rolling resistance, aerodynamic drag:
+`aib.params.road_load`) are a force on the body at its centre of mass (PhysxForceAPI), set
+every step from the body's speed. Each step's wheel states (spin, longitudinal slip, contact)
+are read back for the sensors and the host's surface layer.
 
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
@@ -38,16 +40,27 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
-from .. import powertrain as powertrains
-from ..control import Command, State, ackermann, steer
-from ..esc import Esc
+from ..control import Command, State, ackermann
+from ..deps import use
 from ..frames import qconj, qmul, qrot
-from ..params import G, VehicleParams
+from ..params import G, VehicleParams, road_load
+
+use("sim_vehicle_ecu")
+
+from sim_vehicle_ecu import Calibration, Ecu, Request, Sensors  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
 TIRE_FRICTION = "/World/vehicleTireFriction"
 WHEELS = (("frontLeft", True, 1), ("frontRight", True, -1), ("rearLeft", False, 1),
           ("rearRight", False, -1))
+
+
+class WheelState(NamedTuple):
+    """What PhysX reports for one wheel after a step."""
+
+    rotation_speed: float = 0.0  # rad/s, positive rolling forward
+    slip: float = 0.0  # longitudinal slip: + the wheel spins faster than the road, - slower
+    on_ground: bool = True
 
 
 class Contact(NamedTuple):
@@ -79,12 +92,14 @@ def ensure_vehicle_scene(stage):
 
 
 class Vehicle:
-    def __init__(self, stage, path, params: VehicleParams, box_center, box_dims, pose):
+    def __init__(self, stage, path, params: VehicleParams, calibration: Calibration, box_center,
+                 box_dims, pose):
+        """`params`: the PhysX vehicle (a rig's `vehicle`); `calibration`: its onboard
+        computers' (a rig's `ecu`)."""
         self.stage = stage
         self.path = path
         self.p = p = params
-        self.powertrain = powertrains.make(params)
-        self.esc = Esc(params)
+        self.ecu = Ecu(calibration)
         ensure_vehicle_scene(stage)
         root = UsdGeom.Xform.Define(stage, path)
         prim = root.GetPrim()
@@ -132,7 +147,7 @@ class Vehicle:
         frame_z = r + (p.suspension_travel - sag)
         self.wheels = []
         self.wheel_paths = [f"{path}/{name}" for name, _, _ in WHEELS]
-        self.wheel_states = None  # aib.powertrain.WheelState per wheel, after a step
+        self.wheel_states = None  # WheelState per wheel, after a step
         self.contacts = None  # Contact per wheel, after a step
         self.friction = []  # each wheel's table's defaultFrictionValue attribute
         self.friction_values = [p.tire_friction] * len(WHEELS)
@@ -206,7 +221,7 @@ class Vehicle:
             .CreateIncludesRel().AddTarget(cube.GetPath())
         self.body_path = cube.GetPath()
         self.tire_angle = 0.0
-        self.torques = None  # the last step's aib.powertrain.Torques
+        self.torques = None  # the last step's sim_vehicle_ecu.Actuation
         self.last = None  # (position, quat, velocity in world) of the last substep
 
     # --- Pose ------------------------------------------------------------------------------
@@ -231,31 +246,37 @@ class Vehicle:
         self.wheel_states = None
         self.contacts = None
         self.road_load.Set(Gf.Vec3f(0, 0, 0))
-        self.powertrain.reset()
-        self.esc.reset()
+        self.ecu.reset()
+        self.tire_angle = 0.0
 
     # --- Actuation -------------------------------------------------------------------------
 
     def apply(self, cmd: Command, dt, state: State):
+        """One physics step's actuation: the vehicle interface's `cmd` as the by-wire request,
+        the car's sensors as the last step left them, through the onboard computers."""
         p = self.p
-        self.tire_angle = steer(self.tire_angle, cmd.tire_angle, dt, p.max_steer_angle,
-                                p.steer_time_constant, p.steer_rate_limit)
+        request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
+        self.torques = act = self.ecu.step(request, self.sensors(state), dt)
+        self.tire_angle = act.tire_angle
         if p.ackermann:
             left, right = ackermann(self.tire_angle, p.wheel_base, p.wheel_tread)
         else:
             left = right = self.tire_angle
-        speed = state.velocity[0]
-        mu = sum(self.friction_values) / len(self.friction_values)
-        esc = self.esc.step(speed, state.angular_velocity[2], state.velocity[1],
-                            self.tire_angle, mu, dt)
-        self.torques = self.powertrain.torques(cmd, speed, dt, self.wheel_states, esc)
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
-        for (_, d, b, s), drive, brake, angle in zip(self.wheels, self.torques.drive,
-                                                     self.torques.brake, angles):
+        for (_, d, b, s), drive, brake, angle in zip(self.wheels, act.drive, act.brake, angles):
             d.Set(drive)
             b.Set(brake)
             s.Set(angle)
-        self.road_load.Set(Gf.Vec3f(powertrains.resistance(p, speed), 0.0, 0.0))
+        self.road_load.Set(Gf.Vec3f(road_load(p, state.velocity[0]), 0.0, 0.0))
+
+    def sensors(self, state: State):
+        """What the car's own sensors read after the last step: the wheel speed sensors and
+        the brake module's yaw-rate and acceleration sensor (body frame). None before PhysX
+        has stepped the wheels."""
+        if self.wheel_states is None:
+            return None
+        return Sensors(tuple(w.rotation_speed for w in self.wheel_states),
+                       state.angular_velocity[2], state.acceleration[0], state.acceleration[1])
 
     def set_wheel_friction(self, i, mu):
         """Wheel `i`'s (WHEELS order) friction from the next step on; written only when it
@@ -278,7 +299,7 @@ class Vehicle:
             if not w:
                 return None, None
             on_ground = bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])
-            out.append(powertrains.WheelState(
+            out.append(WheelState(
                 float(w[VEHICLE_WHEEL_STATE_ROTATION_SPEED]),
                 float(w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP]),
                 on_ground))

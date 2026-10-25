@@ -1,7 +1,12 @@
-"""Open-loop step tests of the ego's PhysX vehicle and powertrain in Isaac: no ROS, no Autoware.
+"""Open-loop step tests of the ego's PhysX vehicle and its onboard computers in Isaac: no ROS,
+no Autoware.
 
     python -m aib.steptest --out DIR [--ego config/ego.yaml] [--powertrain ev|ideal]
         [--set field=value ...] [--world <usd>] [--only test,...]
+
+`--set` takes a field of the PhysX vehicle (aib.params.VehicleParams) or of the onboard
+computers' calibration (sim_vehicle_ecu.Calibration), by name; `--powertrain` is the
+calibration's `powertrain`.
 
 Run it through `just isaac-steptest` (Isaac's environment). The vehicle is built from the
 ego config's rig exactly as `aib.runner` builds it (aib.isaac.vehicle.Vehicle), on a flat
@@ -243,7 +248,8 @@ def main(argv=None):
     ap.add_argument("--ego", default=str(Path(__file__).resolve().parents[1] / "config/ego.yaml"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--powertrain", default="")
-    ap.add_argument("--set", action="append", default=[], help="VehicleParams field=value")
+    ap.add_argument("--set", action="append", default=[],
+                    help="VehicleParams or Calibration field=value")
     ap.add_argument("--world", default="")
     ap.add_argument("--only", default="")
     ap.add_argument("--label", default="")
@@ -251,28 +257,33 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log = logging.getLogger("aib.steptest")
+    from dataclasses import fields
+
     from .control import GEAR_DRIVE, GEAR_NEUTRAL, Command, State
+    from .params import VehicleParams, road_load
     from .rig import EgoConfig
 
     cfg = EgoConfig.load(args.ego)
-    overrides = dict(cfg.vehicle)
+    vehicle, ecu = dict(cfg.vehicle), dict(cfg.ecu)
     if args.powertrain:
-        overrides["powertrain"] = args.powertrain
+        ecu["powertrain"] = args.powertrain
+    physx_fields = {f.name for f in fields(VehicleParams)}
     for kv in args.set:
         k, v = kv.split("=", 1)
-        overrides[k] = json.loads(v) if v[:1] in "-0123456789tf[" else v
-    cfg.vehicle = overrides
+        (vehicle if k in physx_fields else ecu)[k] = (
+            json.loads(v) if v[:1] in "-0123456789tf[" else v)
+    cfg.vehicle, cfg.ecu = vehicle, ecu
+    overrides = {**vehicle, **ecu}
     rig = cfg.load_rig()
     params = rig.vehicle
     _MASS[0] = params.mass
-    from . import powertrain as pt
 
     def expected(v):
         m = params.mass + 2 * params.wheel_mass
-        return (-pt.resistance(params, v)
+        return (-road_load(params, v)
                 + 4 * params.wheel_damping_rate * v / params.wheel_radius ** 2) / m
     _EXPECT[0] = expected
-    label = args.label or params.powertrain
+    label = args.label or rig.ecu.powertrain
     out = Path(args.out) / label
     out.mkdir(parents=True, exist_ok=True)
     os.environ.pop("DISPLAY", None)
@@ -299,10 +310,10 @@ def main(argv=None):
     world.play()
     physx = omni.physx.get_physx_interface()
     pose = ((0.0, 0.0, 0.05), (1.0, 0.0, 0.0, 0.0))
-    veh = Vehicle(stage, "/World/ego", params, rig.box_center, rig.box_dims, pose)
-    log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, params.powertrain,
+    veh = Vehicle(stage, "/World/ego", params, rig.ecu, rig.box_center, rig.box_dims, pose)
+    log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
              SUB, dt)
-    summary = {"powertrain": params.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},
+    summary = {"powertrain": rig.ecu.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},
                "tests": {}}
     only = [t for t in args.only.split(",") if t]
     try:
@@ -333,7 +344,7 @@ def main(argv=None):
                 t += FRAME
                 vx = state.velocity[0]
                 ws = veh.wheel_states or [None] * 4
-                dbg = getattr(veh.powertrain, "debug", {}) or {}
+                dbg = veh.ecu.debug
                 tq = veh.torques
                 row = {"t": round(t, 3), "v": vx, "a": (vx - v_prev) / FRAME,
                        "x": state.position[0] - x0, "y": state.position[1],

@@ -16,7 +16,8 @@ class RigTest(unittest.TestCase):
         r = Rig.load(RIG)
         self.assertEqual(r.name, "tesla_model3")
         self.assertEqual(r.vehicle.mass, 1760.0)
-        self.assertEqual(r.vehicle.motor_peak_power, 194000.0)
+        self.assertEqual(r.ecu.motor_peak_power, 194000.0)  # the onboard computers', from the spec
+        self.assertFalse(hasattr(r.vehicle, "motor_peak_power"))
         self.assertEqual([s.name for s in r.of_type("lidar")], ["top"])
         self.assertEqual(r.of_type("camera"), [])
         self.assertEqual(len(r.of_type("camera", enabled_only=False)), 1)
@@ -34,12 +35,24 @@ class RigTest(unittest.TestCase):
             Rig.load(RIG, None, {"radar": {"enabled": True}})
         with self.assertRaises(ValueError):
             Rig.load(RIG, None, {"top": {"translation": [0, 0, 0]}})
+        r = Rig.load(RIG, None, None, {"esc_enabled": True})
+        self.assertTrue(r.ecu.esc_enabled)
+        with self.assertRaises(ValueError):  # a calibration field is not a PhysX one
+            Rig.load(RIG, {"esc_enabled": True})
+
+    def test_a_stale_rig_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "r.yaml"
+            p.write_text(RIG.read_text().replace("spec_hash: ", "spec_hash: 0", 1))
+            with self.assertRaisesRegex(ValueError, "just generate"):
+                Rig.load(p)
 
     def test_the_shipped_ego_config(self):
         cfg = EgoConfig.load(EGO)
         self.assertEqual(Path(cfg.rig), RIG)
         self.assertEqual(cfg.domain, 1)
         self.assertEqual(cfg.vehicle, {})
+        self.assertEqual(cfg.ecu, {})
         self.assertEqual(cfg.load_rig().name, "tesla_model3")
 
     def test_clock_offset_is_refused_by_name(self):

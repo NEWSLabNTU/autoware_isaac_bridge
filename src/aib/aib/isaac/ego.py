@@ -7,7 +7,7 @@ runner (`aib.runner`) -- owns the stage and the clock and calls, every frame:
 
     ego.take_commands()                    # Autoware's commands that arrived
     for each physics substep:
-        ego.before_substep(dt)             # apply them (powertrain, steering)
+        ego.before_substep(dt)             # apply them (the onboard computers, the wheels)
         world.step(...)                    # the host's physics (and the last substep's render)
         ego.after_substep(physx, dt)       # read the body back
     stamp = ros.publish_clock(end)         # the host's /clock, once per frame
@@ -37,7 +37,7 @@ class Ego:
         self.name = name
         self.path = path
         self.ros = ros
-        self.vehicle = Vehicle(stage, path, params or rig.vehicle,
+        self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.ecu,
                                box_center or rig.box_center, box_dims or rig.box_dims, pose)
         self.state = State()
         self.sensors = [sensor_kinds.make(s, ros, stage, path)

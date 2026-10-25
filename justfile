@@ -169,11 +169,12 @@ vehicle-check *args:
     sys.exit(1 if bad else 0)
     PY
 
-# Open-loop step tests of the PhysX vehicle and powertrain in Isaac, no ROS (aib.steptest):
+# Open-loop step tests of the PhysX vehicle and its onboard computers in Isaac, no ROS (aib.steptest):
 #   out:=<dir>          where the CSVs and summary.json go (default /mnt/disk1/aib-ev/steptest)
-#   powertrain:=<model> override the rig's (ev, ideal)
+#   powertrain:=<model> override the calibration's (ev, ideal)
 #   only:=a,b           some of: launch brake_100 regen_60 steps accel_brake hard_brake limit_brake
-#   set:=k=v            a VehicleParams override (JSON values; repeat for more); label:=<name> the
+#   set:=k=v            a VehicleParams or Calibration override (JSON values; repeat for more);
+#                       label:=<name> the
 #                       run's subdirectory
 [positional-arguments]
 isaac-steptest *args:

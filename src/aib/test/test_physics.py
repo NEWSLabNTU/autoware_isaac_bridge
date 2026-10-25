@@ -1,13 +1,13 @@
-"""Vehicle parameters, the powertrain seam and the steering: the maths the PhysX vehicle
-applies every substep. Pure. Ported from swb's test_vehicle_params.py where it applies."""
+"""Vehicle parameters, the road load and the steering linkage: the maths the PhysX vehicle
+applies every substep. Pure. Ported from swb's test_vehicle_params.py where it applies. The
+onboard computers' (powertrain, brakes, steering actuator) are tested in sim_vehicle_ecu."""
 import math
 import unittest
 
 _paths = __import__("_paths")  # sys.path, for direct runs
-from aib import powertrain
-from aib.control import (GEAR_DRIVE, GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, Command,
-                         ackermann, gear_from_command, steer)
-from aib.params import (G, VehicleMismatch, VehicleParams, bicycle_limit, check_geometry)
+from aib.control import GEAR_DRIVE, GEAR_PARK, ackermann, gear_from_command
+from aib.params import (G, VehicleMismatch, VehicleParams, bicycle_limit, check_geometry,
+                        road_load)
 
 
 class ParamsTest(unittest.TestCase):
@@ -28,18 +28,6 @@ class ParamsTest(unittest.TestCase):
         front, rear = VehicleParams(mass=2000.0, wheel_base=3.0, com=(2.0, 0.0, 0.5)).axle_loads()
         self.assertAlmostEqual(2 * (front + rear), 2000.0)
         self.assertGreater(front, rear)
-
-    def test_braking_moves_load_and_brake_force_forward(self):
-        p = VehicleParams()
-        static = p.brake_split(0.0)
-        self.assertAlmostEqual(static, p.com[0] / p.wheel_base)
-        self.assertGreater(p.brake_split(8.0), static + 0.1)
-        self.assertAlmostEqual(VehicleParams(brake_distribution="static").brake_split(8.0), static)
-
-    def test_a_hard_stop_can_reach_the_tire_limit(self):
-        p = VehicleParams()
-        need = p.mass * G * p.tire_friction * p.wheel_radius
-        self.assertLess(need * p.brake_split(G) / 2, p.max_brake_torque)
 
     def test_the_suspension_sits_level(self):
         p = VehicleParams()
@@ -69,81 +57,16 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(bicycle_limit(0.0, 3.0, 1.6), 0.0)
 
 
-class IdealPowertrainTest(unittest.TestCase):
-    def setUp(self):
-        # No road load or wheel damping: the force is m a alone
-        self.p = VehicleParams(powertrain="ideal", rolling_coefficient=0.0,
-                               drag_coefficient=0.0, wheel_damping_rate=0.0)
-        self.pt = powertrain.make(self.p)
-        self.mass = self.p.mass + 2 * self.p.wheel_mass  # four wheels at 0.5 m r^2 / r^2
-
-    def test_it_is_ideal(self):
-        self.assertEqual(self.pt.name, "ideal")
-
-    def test_standing_still_holds(self):
-        drive, brakes = self.pt.torques(Command(), 0.0, 0.01)
-        self.assertEqual(drive, (0.0,) * 4)
-        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 4)
-        _, brakes = self.pt.torques(Command(acceleration=1.0, velocity=5.0, gear=GEAR_PARK), 3.0, 0.01)
-        self.assertEqual(brakes, (self.p.hold_brake_torque,) * 4)
-
-    def test_acceleration_is_m_a_over_four_wheels(self):
-        drive, brakes = self.pt.torques(Command(acceleration=1.0, velocity=5.0), 2.0, 0.01)
-        for d in drive:
-            self.assertAlmostEqual(d, self.mass * 1.0 * self.p.wheel_radius / 4)
-        self.assertEqual(brakes, (0.0,) * 4)
-
-    def test_drive_is_capped_and_reverse_drives_backwards(self):
-        drive, _ = self.pt.torques(Command(acceleration=50.0, velocity=5.0), 2.0, 0.01)
-        self.assertEqual(drive, (self.p.max_drive_torque,) * 4)
-        drive, _ = self.pt.torques(Command(acceleration=1.0, velocity=-2.0, gear=GEAR_REVERSE), -1.0, 0.01)
-        self.assertLess(drive[0], 0.0)
-
-    def test_deceleration_brakes_split_by_dynamic_load(self):
-        drive, (fl, fr, rl, rr) = self.pt.torques(Command(acceleration=-3.0, velocity=5.0), 7.4, 0.01)
-        self.assertEqual(drive, (0.0,) * 4)
-        self.assertEqual((fl, rl), (fr, rr))
-        total = self.mass * 3.0 * self.p.wheel_radius
-        self.assertAlmostEqual(2 * (fl + rl), total)
-        self.assertAlmostEqual(fl / (fl + rl), self.p.brake_split(3.0))
-        self.assertGreater(fl, rl)
-
-    def test_brakes_are_capped(self):
-        _, brakes = self.pt.torques(Command(acceleration=-100.0, velocity=5.0), 10.0, 0.01)
-        self.assertEqual(brakes[0], self.p.max_brake_torque)
-
-    def test_neutral_coasts(self):
-        self.assertEqual(self.pt.torques(Command(acceleration=1.0, velocity=3.0, gear=GEAR_NEUTRAL), 3.0, 0.01),
-                         ((0.0,) * 4, (0.0,) * 4))
-
-    def test_the_road_load_is_in_the_feedforward(self):
-        # The physics applies the road load to the body; ideal pushes against it, so a
-        # cruise at a = 0 still needs drive (and the request is still realized).
-        p = VehicleParams(powertrain="ideal", wheel_damping_rate=0.0)
-        drive, _ = powertrain.make(p).torques(Command(acceleration=0.0, velocity=20.0), 20.0, 0.01)
-        load = -powertrain.resistance(p, 20.0)
-        self.assertAlmostEqual(load, p.rolling_coefficient * p.mass * G
-                               + 0.5 * 1.2 * 0.23 * 2.2 * 400.0)
-        self.assertAlmostEqual(sum(drive), load * p.wheel_radius)
-
-    def test_reserved_models_fail_loudly(self):
-        for name in ("physx", "fmu"):
-            with self.assertRaises(NotImplementedError):
-                powertrain.make(VehicleParams(powertrain=name))
-        with self.assertRaises(ValueError):
-            powertrain.make(VehicleParams(powertrain="steam"))
+class RoadLoadTest(unittest.TestCase):
+    def test_road_load(self):
+        p = VehicleParams()
+        self.assertEqual(road_load(p, 0.0), 0.0)
+        roll = 0.0095 * 1760.0 * G
+        self.assertAlmostEqual(road_load(p, 0.25), -(roll / 2 + 0.5 * 1.2 * 0.506 * 0.0625))
+        self.assertAlmostEqual(road_load(p, -10.0), roll + 0.5 * 1.2 * 0.23 * 2.2 * 100)
 
 
 class SteeringTest(unittest.TestCase):
-    def test_clamped_to_the_limit(self):
-        self.assertEqual(steer(0.0, 2.0, 0.01, 0.7), 0.7)
-        self.assertEqual(steer(0.0, -2.0, 0.01, 0.7), -0.7)
-
-    def test_lag_and_rate_limit(self):
-        a = steer(0.0, 0.5, 0.1, 0.7, time_constant=0.1)
-        self.assertAlmostEqual(a, 0.5 * (1 - math.exp(-1)))
-        self.assertAlmostEqual(steer(0.0, 0.5, 0.1, 0.7, rate_limit=1.0), 0.1)
-
     def test_ackermann_inner_wheel_turns_more(self):
         left, right = ackermann(0.3, 3.005, 1.667)
         self.assertGreater(left, 0.3)

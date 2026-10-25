@@ -7,17 +7,18 @@ sensors from (aib.rig).
 The spec is sim_vehicle_spec's (deps/sim_vehicle_spec, a submodule): one per car, the same one
 Autoware's packages (autoware_sim_vehicle), CARLA's files and the SSv2 catalog come from. This
 writes only what is aib's: `src/aib/config/<name>.rig.yaml`, whose `vehicle` is aib's own
-parameter schema (aib.params.VehicleParams). Every rig names its spec and spec_hash.
+parameter schema (aib.params.VehicleParams). Every rig names its spec and spec_hash. The car's
+onboard computers (sim_vehicle_ecu) read their calibration from the same spec when the rig is
+loaded (aib.rig), so the rig holds the PhysX vehicle only.
 """
 import argparse
-from dataclasses import fields
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[3]
-SPECS = REPO / "deps/sim_vehicle_spec/vehicles"
-if str(REPO / "deps/sim_vehicle_spec") not in sys.path:
-    sys.path.insert(0, str(REPO / "deps/sim_vehicle_spec"))
+from .deps import DEPS, REPO, use
+
+use("sim_vehicle_spec")
+SPECS = DEPS / "sim_vehicle_spec/vehicles"
 
 from sim_vehicle_spec import emit  # noqa: E402
 from sim_vehicle_spec import spec as specmod  # noqa: E402
@@ -28,14 +29,10 @@ TOOL = "aib.gen (autoware_isaac_bridge `just generate`)"
 
 
 def vehicle_params(spec):
-    """The flat VehicleParams of a spec."""
+    """The flat VehicleParams of a spec: the PhysX vehicle."""
     d = spec.doc
     g, i, w, t = d["geometry"], d["inertia"], d["wheels"], d["tires"]
-    b, p = d["brakes"], d["powertrain"]
     rs = d.get("resistance")
-    abs_ = b.get("abs") or {}
-    esc = b.get("esc") or {}
-    tc = p.get("traction_control") or {}
     st, su = spec.section("steering"), d["suspension"]
     px = spec.section("isaac").get("physx") or {}
     base = VehicleParams()
@@ -53,37 +50,10 @@ def vehicle_params(spec):
         lat_stiff_value=t.get("lat_stiff_value", base.lat_stiff_value),
         long_stiff_value=t.get("long_stiff_value", base.long_stiff_value),
         friction_vs_slip=tuple(tuple(x) for x in t.get("friction_vs_slip", base.friction_vs_slip)),
-        powertrain=p["model"], max_drive_torque=p["max_drive_torque"],
-        max_brake_torque=b["max_brake_torque"],
-        hold_brake_torque=b.get("hold_brake_torque", base.hold_brake_torque),
-        brake_distribution=b.get("distribution", base.brake_distribution),
-        brake_dead_time=b.get("dead_time", base.brake_dead_time),
-        brake_time_constant=b.get("time_constant", base.brake_time_constant),
         ackermann=bool(st.get("ackermann", True)),
-        steer_time_constant=st.get("time_constant", 0.0),
-        steer_rate_limit=st.get("rate_limit", 0.0),
         suspension_frequency=su["frequency"], suspension_damping_ratio=su["damping_ratio"],
         suspension_travel=su["travel"],
     )
-    for key, field in (("enabled", "abs_enabled"), ("slip_release", "abs_slip_release"),
-                       ("slip_reapply", "abs_slip_reapply"), ("release_rate", "abs_release_rate"),
-                       ("apply_rate", "abs_apply_rate"), ("min_speed", "abs_min_speed")):
-        values[field] = abs_.get(key, getattr(base, field))
-    # The stability control (aib.esc): a spec's brakes.esc, by the field's name without
-    # its esc_ prefix; off when the spec has none.
-    for f in fields(VehicleParams):
-        if f.name.startswith("esc_"):
-            values[f.name] = esc.get(f.name[4:], getattr(base, f.name))
-    for key in ("drive_axle", "front_drive_share", "gear_ratio", "motor_peak_torque",
-                "motor_peak_power", "motor_max_rpm", "motor_time_constant", "regen_max_torque",
-                "regen_max_power"):
-        values[key] = p.get(key, getattr(base, key))
-    fade = p.get("regen_fade_speeds", (base.regen_fade_low, base.regen_fade_high))
-    values["regen_fade_low"], values["regen_fade_high"] = fade
-    for key, field in (("enabled", "tc_enabled"), ("slip_limit", "tc_slip_limit"),
-                       ("slip_reapply", "tc_slip_reapply"), ("release_rate", "tc_release_rate"),
-                       ("apply_rate", "tc_apply_rate")):
-        values[field] = tc.get(key, getattr(base, field))
     # No `resistance` section: no road load (a spec says what its car has).
     for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
         values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)

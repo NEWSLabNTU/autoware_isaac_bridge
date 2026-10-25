@@ -2,14 +2,21 @@
 names it. Pure.
 
 A rig (`config/<vehicle>.rig.yaml`, written by `aib.gen` from a vehicle spec) is the vehicle:
-its flat physics (`VehicleParams`), its chassis box, its sensors in base_link. An ego config
-(`config/ego.yaml`) is a run of it: which rig, the ROS domain, the clock, and hand overrides
-of either, applied last.
+its flat physics (`VehicleParams`), its chassis box, its sensors in base_link. Loading it also
+loads the spec it names (under `deps/`) for the car's onboard computers' calibration
+(`sim_vehicle_ecu.Calibration`), and refuses a spec whose `spec_hash` is not the rig's. An ego
+config (`config/ego.yaml`) is a run of it: which rig, the ROS domain, and hand overrides of
+the PhysX vehicle, the calibration and the sensors, applied last.
 """
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from .deps import DEPS, use
 from .params import VehicleParams
+
+use("sim_vehicle_spec", "sim_vehicle_ecu")
+
+from sim_vehicle_ecu import Calibration  # noqa: E402
 
 SENSOR_OVERRIDES = ("enabled", "topic", "frame", "rate_hz", "isaac")
 
@@ -41,6 +48,7 @@ class SensorRig:
 class Rig:
     name: str
     vehicle: VehicleParams
+    ecu: Calibration  # the onboard computers', from the spec
     box_center: tuple
     box_dims: tuple
     catalogue_model: str = ""
@@ -50,7 +58,7 @@ class Rig:
     path: str = ""
 
     @classmethod
-    def load(cls, path, vehicle_overrides=None, sensor_overrides=None):
+    def load(cls, path, vehicle_overrides=None, sensor_overrides=None, ecu_overrides=None):
         import yaml
 
         path = Path(path)
@@ -76,18 +84,35 @@ class Rig:
             sensors[name] = SensorRig(name=name, translation=t, quat=q, extra=s, isaac=isaac,
                                       **core)
         body = doc.get("body") or {}
+        spec_hash = str(doc.get("spec_hash") or "")
         return cls(name=doc.get("name", path.stem),
                    vehicle=VehicleParams.from_dict(doc.get("vehicle"), vehicle_overrides),
+                   ecu=Calibration.from_spec(spec_doc(path, doc.get("spec"), spec_hash),
+                                             ecu_overrides),
                    box_center=tuple(body.get("box_center", (1.5, 0.0, 0.75))),
                    box_dims=tuple(body.get("box_dims", (4.8, 2.1, 1.5))),
                    catalogue_model=body.get("catalogue_model", ""),
                    sensors=sensors, assumptions=list(doc.get("assumptions") or []),
-                   spec_hash=str(doc.get("spec_hash") or ""),
-                   path=str(path))
+                   spec_hash=spec_hash, path=str(path))
 
     def of_type(self, kind, enabled_only=True):
         return [s for s in self.sensors.values()
                 if s.type == kind and (s.enabled or not enabled_only)]
+
+
+def spec_doc(rig_path, spec, spec_hash):
+    """The document of the spec a rig names (`spec:`, relative to `deps/`), refused when its
+    spec_hash is not the rig's: the rig would be stale (`just generate`)."""
+    from sim_vehicle_spec import spec as specmod
+
+    if not spec:
+        raise ValueError(f"{rig_path}: no spec (regenerate the rig: just generate)")
+    loaded = specmod.load(DEPS / spec)
+    have = specmod.spec_hash(loaded)
+    if spec_hash and have != spec_hash:
+        raise ValueError(f"{rig_path}: generated from spec_hash {spec_hash[:12]}, but "
+                         f"{DEPS / spec} is {have[:12]}: run just generate")
+    return loaded.doc
 
 
 @dataclass
@@ -98,6 +123,7 @@ class EgoConfig:
     domain: int = 1
     node_name: str = "isaac_vehicle"
     vehicle: dict = field(default_factory=dict)  # VehicleParams overrides, by field name
+    ecu: dict = field(default_factory=dict)  # sim_vehicle_ecu.Calibration overrides, by name
     sensors: dict = field(default_factory=dict)  # sensor name -> overrides (SENSOR_OVERRIDES)
 
     @classmethod
@@ -121,4 +147,4 @@ class EgoConfig:
         return cfg
 
     def load_rig(self):
-        return Rig.load(self.rig, self.vehicle, self.sensors)
+        return Rig.load(self.rig, self.vehicle, self.sensors, self.ecu)

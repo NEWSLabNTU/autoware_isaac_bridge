@@ -8,7 +8,11 @@ rig: tesla_model3.rig.yaml
 domain: 1
 node_name: isaac_vehicle
 # Hand overrides, applied last (for experiments; a lasting change belongs in the spec).
-# Any VehicleParams field by name (aib/params.py), e.g. `mass: 1900.0`, `tire_friction: 0.7`.
+# The PhysX vehicle: any VehicleParams field by name (aib/params.py), e.g. `mass: 1900.0`,
+# `tire_friction: 0.7`.
 vehicle: {}
+# The onboard computers (deps/sim_vehicle_ecu): any Calibration field by name
+# (sim_vehicle_ecu/calibration.py), e.g. `esc_enabled: true`, `abs_slip_release: 0.3`.
+ecu: {}
 # Per sensor: enabled, topic, frame, rate_hz, isaac, e.g. `camera6: {enabled: true}`.
 sensors: {}

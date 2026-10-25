@@ -1,8 +1,12 @@
 """What the ego's PhysX vehicle is: pure data, no Isaac.
 
-`VehicleParams` is the flat form the Isaac side consumes. It is written into a rig file by
-the generator from a vehicle spec (`aib.gen.vehicle_params`), and a host may override any
-field by name afterwards (an ego config's `vehicle:` mapping).
+`VehicleParams` is the flat form the Isaac side consumes: the body, the wheels and tires, the
+suspension, the mechanical parts (the steering's stop, the Ackermann linkage), the road loads
+the body meets, PhysX's settings. It is written into a rig file by the generator from a
+vehicle spec (`aib.gen.vehicle_params`), and a host may override any field by name afterwards
+(an ego config's `vehicle:` mapping). What drives the wheels -- the drive unit's controller,
+the brake module with ABS, traction control and ESC, the power steering -- is the car's
+onboard computers, `sim_vehicle_ecu` (roadmap 055), with a calibration of its own.
 
 Defaults are the shipped spec's (sim_vehicle_spec's vehicles/tesla_model3.yaml) so a bare
 `VehicleParams()` is the same car; the spec, not these defaults, is the source of truth.
@@ -41,61 +45,12 @@ class VehicleParams:
     lat_stiff_value: float = 17.0
     long_stiff_value: float = 4612.5
     friction_vs_slip: tuple = ((0.0, 1.0), (0.1, 1.0), (1.0, 0.8))
-    # Actuation
-    powertrain: str = "ev"
-    max_drive_torque: float = 1500.0  # per wheel, N m (ideal)
-    max_brake_torque: float = 3000.0  # per wheel, N m
-    hold_brake_torque: float = 1500.0  # per wheel, N m
-    brake_distribution: str = "dynamic_axle_load"
-    # Friction brake hydraulics (ev): dead time, then a first-order pressure lag
-    brake_dead_time: float = 0.08  # s
-    brake_time_constant: float = 0.06  # s
-    # ABS (ev): per wheel, on longitudinal slip against the direction of travel
-    abs_enabled: bool = True
-    abs_slip_release: float = 0.25
-    abs_slip_reapply: float = 0.15
-    abs_release_rate: float = 8.0  # 1/s, of the brake pressure factor
-    abs_apply_rate: float = 4.0  # 1/s
-    abs_min_speed: float = 1.5  # m/s
-    # Electric drive unit (ev)
-    drive_axle: str = "rear"  # rear | front | all
-    front_drive_share: float = 0.0  # the front axle's share of motor torque when "all"
-    gear_ratio: float = 10.0  # motor to wheel, single speed
-    motor_peak_torque: float = 340.0  # N m at the motor shaft
-    motor_peak_power: float = 194000.0  # W
-    motor_max_rpm: float = 15200.0
-    motor_time_constant: float = 0.04  # s, the inverter/motor torque lag
-    regen_max_torque: float = 130.0  # N m at the motor shaft
-    regen_max_power: float = 60000.0  # W
-    regen_fade_low: float = 1.0  # m/s: no regen at or below
-    regen_fade_high: float = 3.0  # m/s: full regen at or above
-    # Traction control (ev): driven wheels' slip cuts motor torque
-    tc_enabled: bool = True
-    tc_slip_limit: float = 0.25
-    tc_slip_reapply: float = 0.15
-    tc_release_rate: float = 20.0  # 1/s, of the motor torque factor
-    tc_apply_rate: float = 5.0  # 1/s
-    # Stability control (aib.esc): one wheel's brake against a yaw rate the tires cannot hold
-    esc_enabled: bool = False
-    esc_min_speed: float = 3.0  # m/s: off below
-    esc_understeer: float = 0.0  # s^2/m^2, the target's understeer: r = v tan(d) / (L (1 + K v^2))
-    esc_target_margin: float = 0.85  # the target capped at this share of mu g / v
-    esc_dead_band: float = 0.035  # rad/s
-    esc_dead_band_share: float = 0.1  # of the target yaw rate, added to the dead band
-    esc_gain: float = 12000.0  # N m of yaw moment per rad/s of yaw rate error
-    esc_sideslip_limit: float = 0.07  # rad
-    esc_sideslip_gain: float = 30000.0  # N m per rad of sideslip past the limit
-    esc_max_brake_torque: float = 2000.0  # N m on the one wheel
-    esc_motor_cut_rate: float = 5.0  # 1/s, of the motor torque factor, against oversteer
-    esc_motor_restore_rate: float = 1.0  # 1/s
-    # Road loads, applied to the body as a force (all models)
+    # Road loads, applied to the body as a force (`road_load`)
     rolling_coefficient: float = 0.0095  # Crr
     drag_coefficient: float = 0.23  # Cd
     frontal_area: float = 2.2  # m^2
     air_density: float = 1.2  # kg/m^3
-    ackermann: bool = True
-    steer_time_constant: float = 0.0  # s; 0: none
-    steer_rate_limit: float = 0.0  # rad/s; 0: none
+    ackermann: bool = True  # the linkage splits the bicycle angle into Ackermann angles
     # Suspension
     suspension_frequency: float = 1.6  # Hz
     suspension_damping_ratio: float = 0.45
@@ -131,15 +86,6 @@ class VehicleParams:
         front = min(max(self.com[0] / self.wheel_base, 0.05), 0.95)
         return self.mass * front / 2, self.mass * (1 - front) / 2
 
-    def brake_split(self, decel):
-        """The front axle's share of a braking force at `decel` (m/s^2). With
-        `dynamic_axle_load`, the dynamic front load's, so all four tires reach their limit
-        together (ideal distribution / EBD); with `static`, the static load's."""
-        a, h = self.com[0], self.com[2]
-        shift = h * max(decel, 0.0) / G if self.brake_distribution == "dynamic_axle_load" else 0.0
-        front = (a + shift) / self.wheel_base
-        return min(max(front, 0.05), 0.95)
-
     def suspension(self):
         """Per axle (front, rear): (sprung mass, spring k N/m, damper c N s/m), and the static
         sag (m), the same on both: each axle at one frequency sags g / w^2."""
@@ -154,6 +100,19 @@ class VehicleParams:
         lx, ly, lz = self.inertia_box
         s = self.mass / 12.0
         return ((ly * ly + lz * lz) * s, (lx * lx + lz * lz) * s, (lx * lx + ly * ly) * s)
+
+
+# Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
+ROLLING_RAMP = 0.5  # m/s
+
+
+def road_load(p, v):
+    """The road load at a speed `v` (m/s along x), N, signed against `v`: rolling resistance
+    (Crr m g, ramped in below ROLLING_RAMP) and aerodynamic drag (rho Cd A v^2 / 2). The host
+    applies it to the body; the onboard computers' feedforward has its own estimate of it."""
+    roll = p.rolling_coefficient * p.mass * G * min(1.0, abs(v) / ROLLING_RAMP)
+    drag = 0.5 * p.air_density * p.drag_coefficient * p.frontal_area * v * v
+    return -math.copysign(roll + drag, v) if v else 0.0
 
 
 def _tuple(v):

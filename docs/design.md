@@ -36,7 +36,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.sim_time` | - | `BASE_NS`, `nanos`, `sim_ns`: the ROS time of a simulation time |
 | `aib.params` | - | `VehicleParams`; axle loads, brake split, suspension rates, inertia; geometry check |
 | `aib.control` | - | `Command`, `State`, gears, the steering actuator, Ackermann |
-| `aib.powertrain` | - | the powertrain seam; `ideal` |
+| `aib.deps` | - | `deps/sim_vehicle_spec` and `deps/sim_vehicle_ecu` on `sys.path` |
 | `aib.frames` | - | quaternions, URDF rpy, transforms, lat/lon about the map origin |
 | `aib.sensing` | numpy | IMU and GNSS readings from the state, the PointCloud2 layout, periodic timers |
 | `aib.rig` | yaml | `Rig`, `SensorRig`, `EgoConfig` |
@@ -46,7 +46,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.isaac.sensors` | Isaac | RTX lidar, RGB camera, IMU, GNSS |
 | `aib.isaac.ego` | Isaac | `Ego`: one vehicle with its sensors and ROS side |
 | `aib.runner` | Isaac | one ego in a world, no swb, no SSv2 |
-| `aib.steptest` | Isaac | open-loop step tests of the PhysX vehicle and powertrain, no ROS |
+| `aib.steptest` | Isaac | open-loop step tests of the PhysX vehicle and its onboard computers, no ROS |
 
 The pure modules are what the unit tests cover, under the system Python (3.10) and Isaac's
 (3.12) alike.
@@ -59,7 +59,7 @@ A host owns the stage and the clock. Per frame (20 Hz by default, 3 physics subs
 ```
 ego.take_commands()                 # Autoware's commands that arrived (non-blocking)
 for each substep:
-    ego.before_substep(dt)          # powertrain torques, steering, written to the wheels
+    ego.before_substep(dt)          # the onboard computers' torques and steering, to the wheels
     world.step(render=last substep and a rendering sensor)
     ego.after_substep(physx, dt)    # pose; velocity, yaw rate, acceleration by difference
 stamp = ros.publish_clock(t_end)    # once per frame, by the host
@@ -99,13 +99,31 @@ The physics numbers, their sources and which are assumptions are in the spec; th
 spec is the "plausible real Model 3" of scenario-world-bridge roadmap 043 ("As built:
 vehicle").
 
-## Powertrain
+## The onboard computers
 
-`aib.powertrain` is the seam between Autoware's longitudinal command and the wheels:
-`torques(cmd, speed, dt, wheels) -> Torques(drive[4], brake[4])`, per wheel in `WHEELS`
-order, chosen by the spec's `powertrain.model`. `Vehicle.apply` calls it every physics step
-(1/60 s; PhysX substeps the vehicle 8 times inside each), with the wheel states (spin,
-longitudinal slip, on ground) `Vehicle.sample` read back from PhysX after the previous step.
+Between the vehicle interface and the wheels sit the car's onboard computers: the drive
+unit's controller, the brake module (brake distribution, ABS, traction control, ESC) and the
+power steering, with the actuators PhysX's drive-none vehicle lacks. Since
+scenario-world-bridge roadmap 055 they are not aib's: they are
+[sim_vehicle_ecu](https://github.com/NEWSLabNTU/sim_vehicle_ecu) (`deps/sim_vehicle_ecu`),
+which knows no simulator and no ROS. `Vehicle.apply` steps its `Ecu` every physics step (1/60
+s; PhysX substeps the vehicle 8 times inside each) with Autoware's latest command as the
+by-wire request and what the car's own sensors read after the previous step (`Vehicle.sensors`:
+the four wheel speeds, the body's yaw rate and accelerations), and writes the drive and brake
+torques and the Ackermann angles of its tire angle to the wheels. The car's speed, each wheel's
+slip, the sideslip and the road's friction are the brake module's own estimates; aib hands it
+nothing PhysX knows that a car's sensors do not.
+
+Its calibration comes from the spec the rig names (`Rig.ecu`, `sim_vehicle_ecu.Calibration`),
+refused when the spec's `spec_hash` is not the rig's; an ego config's `ecu:` overrides fields by
+name. The rest of this section is the drive unit as it moved (aib `1d49569`); the slip it
+names is the estimate since then.
+
+### Powertrain
+
+`sim_vehicle_ecu.powertrain` is the seam between the longitudinal request and the wheels:
+`torques(req, speed, dt, wheels) -> Torques(drive[4], brake[4])`, per wheel in `WHEELS`
+order, chosen by the spec's `powertrain.model`.
 
 | model | status | what |
 |---|---|---|
@@ -118,19 +136,20 @@ A spec naming a reserved model fails at load (`NotImplementedError`), so nothing
 drives a different car. A new model is a `Powertrain` subclass registered in `make`; it may
 keep state (`reset()` is called on teleport).
 
-### Road loads
+#### Road loads
 
 Rolling resistance (`Crr m g`, ramped in over the first 0.5 m/s) and aerodynamic drag
 (`rho Cd A v^2 / 2`) are a force on the body at its centre of mass (PhysxForceAPI, body
-frame), set every step from the body's speed by `Vehicle.apply`, whichever model drives. They
-are physics, not part of the command. Both models' feedforward (`powertrain.feedforward`)
-adds the same estimate plus PhysX's wheel damping (`4 c v / r^2`), so `ideal` still realizes
+frame), set every step from the body's speed by `Vehicle.apply` (`aib.params.road_load`),
+whichever model drives. They are physics, not part of the command. Both models' feedforward
+(`sim_vehicle_ecu.powertrain.feedforward`) adds the car's estimate of them from its
+calibration (today the same coefficients) plus PhysX's wheel damping (`4 c v / r^2`), so `ideal` still realizes
 the request exactly and `ev` starts from the right torque. Before, `ideal` added a
 `rolling_resistance` force (N per m/s, 0 in the spec) to the command with nothing in the
 physics to cancel it; that key is gone (a spec naming it is refused), and nothing counts a
 load twice.
 
-### `ev`
+#### `ev`
 
 Per physics step, along the gear's direction:
 

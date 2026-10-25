@@ -1,10 +1,11 @@
-"""Autoware's commands, the vehicle's state and the steering actuator: pure, no Isaac.
+"""Autoware's commands, the vehicle's state and the steering linkage: pure, no Isaac.
 
 The actuation follows acb's contract on CARLA: Autoware's `Control` asks for a longitudinal
-acceleration and a tire angle, and the vehicle realizes them. The longitudinal part is the
-powertrain's (`aib.powertrain`); the lateral part is here: the bicycle tire angle through an
-optional actuator (first-order lag, rate limit; both off by default, as acb's), then split
-into Ackermann angles for the two front wheels.
+acceleration and a tire angle, and the vehicle realizes them. The vehicle interface keeps the
+latest `Command` and hands it to the car's onboard computers as their by-wire request
+(`sim_vehicle_ecu`: the drive unit, the brakes, the power steering and its actuator); the
+linkage here splits the steering actuator's bicycle angle into Ackermann angles for the two
+front wheels.
 """
 import math
 from dataclasses import dataclass, field
@@ -44,18 +45,6 @@ def gear_from_command(command):
     if 2 <= command <= 19:  # DRIVE_2 ... DRIVE_18
         return GEAR_DRIVE
     return None
-
-
-def steer(current, request, dt, limit, time_constant=0.0, rate_limit=0.0):
-    """The tire angle after `dt`: `request` clamped to +-limit, through the lag and rate
-    limit when set."""
-    target = max(-limit, min(limit, request))
-    if time_constant > 0:
-        target = current + (target - current) * (1 - math.exp(-dt / time_constant))
-    if rate_limit > 0:
-        step = rate_limit * dt
-        target = max(current - step, min(current + step, target))
-    return target
 
 
 def ackermann(tire_angle, wheel_base, wheel_tread):
