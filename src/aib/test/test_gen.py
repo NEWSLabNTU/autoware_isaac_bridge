@@ -23,8 +23,11 @@ class CheckTest(unittest.TestCase):
         # edited by hand.
         self.assertEqual(gen.stale(), [])
 
-    def test_the_only_output_is_the_rig(self):
-        self.assertEqual(list(gen.outputs()), [RIG_REL])
+    def test_the_outputs_are_one_rig_per_spec(self):
+        specs = sorted((REPO / "deps/sim_vehicle_spec/vehicles").glob("*.yaml"))
+        self.assertEqual(sorted(gen.outputs()),
+                         sorted(f"src/aib/config/{p.stem}.rig.yaml" for p in specs))
+        self.assertIn(RIG_REL, gen.outputs())
 
     def test_a_hand_edit_is_stale_and_generate_fixes_it(self):
         with tempfile.TemporaryDirectory() as tmp:
