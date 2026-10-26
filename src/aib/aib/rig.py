@@ -125,6 +125,9 @@ class EgoConfig:
     vehicle: dict = field(default_factory=dict)  # VehicleParams overrides, by field name
     ecu: dict = field(default_factory=dict)  # sim_vehicle_ecu.Calibration overrides, by name
     sensors: dict = field(default_factory=dict)  # sensor name -> overrides (SENSOR_OVERRIDES)
+    # Where the vehicle takes Autoware's Control from. Another topic puts a node between
+    # Autoware's command gate and the car (autoware-drift's drift_controller, swb roadmap 057).
+    control_topic: str = "/control/command/control_cmd"
 
     @classmethod
     def load(cls, path):

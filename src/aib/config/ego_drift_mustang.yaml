@@ -1,0 +1,11 @@
+# The drift car's ego run (scenario-world-bridge roadmap 057): drift_mustang's rig, and the
+# Control taken from autoware-drift's drift_controller, which sits between Autoware's command
+# gate (/control/command/control_cmd) and the car: it passes Autoware's command through, and
+# replaces it while a drift runs.
+rig: drift_mustang.rig.yaml
+domain: 1
+node_name: isaac_vehicle
+control_topic: /control/command/drift/control_cmd
+vehicle: {}
+ecu: {}
+sensors: {}

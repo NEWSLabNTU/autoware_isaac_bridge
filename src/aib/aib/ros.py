@@ -16,7 +16,8 @@ episode, and the Autoware profile's `clock_guard` ends the stack if it ever goes
 | `/clock` | Clock | |
 | `/perception/traffic_light_recognition/external/traffic_signals` (when the host has signals) | TrafficLightGroupArray | |
 
-Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_cmd}` and
+Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_cmd}` (the
+Control from the ego config's `control_topic`, by default `/control/command/control_cmd`) and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
 
 Stamps are sim time plus BASE_NS (aib.sim_time; scenario-world-bridge roadmap 051): the
@@ -44,7 +45,8 @@ DEFAULT_TOPICS = {
 
 
 class EgoRos:
-    def __init__(self, domain=1, rig=None, node_name="isaac_vehicle"):
+    def __init__(self, domain=1, rig=None, node_name="isaac_vehicle",
+                 control_topic="/control/command/control_cmd"):
         import rclpy
         from autoware_control_msgs.msg import Control
         from autoware_vehicle_msgs.msg import (ControlModeReport, GearCommand, GearReport,
@@ -115,7 +117,7 @@ class EgoRos:
             res.success = req.mode == 1  # AUTONOMOUS, as acb (manual has no driver here)
             return res
 
-        n.create_subscription(Control, "/control/command/control_cmd", on_control, reliable)
+        n.create_subscription(Control, control_topic, on_control, reliable)
         n.create_subscription(GearCommand, "/control/command/gear_cmd", on_gear, reliable)
         n.create_subscription(TurnIndicatorsCommand, "/control/command/turn_indicators_cmd", on_turn, reliable)
         n.create_subscription(HazardLightsCommand, "/control/command/hazard_lights_cmd", on_hazard, reliable)
@@ -125,7 +127,7 @@ class EgoRos:
     @classmethod
     def from_config(cls, cfg, rig=None):
         return cls(domain=cfg.domain, rig=rig,
-                   node_name=cfg.node_name)
+                   node_name=cfg.node_name, control_topic=cfg.control_topic)
 
     def sensor_publisher(self, s):
         """The publisher(s) for a SensorRig, made on first use: (main, info or None)."""
