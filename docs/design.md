@@ -82,6 +82,9 @@ roadmaps 038 and 051):
   hid a restart, and Isaac's time and SSv2's differed by it.)
 - **The lidar one frame late**: a scan sent with its own frame's `/clock` races the EKF pose
   of that stamp to NDT, which then cannot interpolate and flaps MRM.
+- **The lidar stamped at its render**: the RTX annotator's data is two renders old when read
+  (`isaac.latency_frames`, default 2), so a scan takes the stamp of the frame it was rendered
+  in; stamped when read it lagged the car by 0.13 s, 2.6 m at 20 m/s (swb docs/issues/015).
 
 `EgoRos` is made once per process and kept across egos (a new DDS participant among ~200
 Autoware ones takes seconds to be discovered).
@@ -217,7 +220,7 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 
 | type | Isaac | message | notes |
 |---|---|---|---|
-| lidar | RTX lidar (`isaacsim.sensors.experimental.rtx`), the rig's `isaac.config` / `variant` | PointCloud2 x y z intensity return_type channel | channel from the elevation's rank among `channels`; one frame late |
+| lidar | RTX lidar (`isaacsim.sensors.experimental.rtx`), the rig's `isaac.config` / `variant` | PointCloud2 x y z intensity return_type channel | channel from the elevation's rank among `channels`; stamped at its render (`isaac.latency_frames`), sent one frame late |
 | camera | USD camera + `rgb` annotator, focal length from the horizontal FOV | Image rgb8 + CameraInfo (K from the spec) | off in the shipped rig; untested on Isaac |
 | imu | from the state | Imu: orientation, angular velocity, specific force (acceleration minus gravity) in the IMU frame | every frame unless `rate_hz` |
 | gnss | from the state | NavSatFix, GBAS fix, lat/lon about the map origin (TransverseMercator at 0, 0) | `rate_hz` (10) |

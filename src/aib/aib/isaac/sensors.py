@@ -7,6 +7,7 @@ through the ego's EgoRos once per frame, after the frame's physics and render. T
 GNSS are computed from the vehicle's state (`aib.sensing`); the lidar and camera render.
 """
 import array
+import collections
 import logging
 
 from ..frames import advance, compose
@@ -42,7 +43,10 @@ def _pose_after(vehicle, state, dt):
 
 
 class Lidar:
-    """An RTX lidar. Its scan goes out one frame late with its own stamp: sent in the same
+    """An RTX lidar. Its data is `latency` frames old when read (the annotator's: two renders,
+    the rig's `isaac.latency_frames`), so a scan takes the stamp of the frame it was rendered in,
+    not the one it is read in (swb docs/issues/015: 0.13 s of lag, 2.6 m at 20 m/s). It goes out
+    one frame late with that stamp: sent in the same
     instant as `/clock` of its own frame, a scan races the EKF pose of that stamp to
     ndt_scan_matcher, whose pose buffer then cannot interpolate ("Couldn't interpolate
     pose" -> localization not OK -> MRM for a cycle, swb roadmap 038). On CARLA the scan
@@ -83,6 +87,8 @@ class Lidar:
         self.channels = int(rig.extra.get("channels", 128))
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
+        self.latency = int(rig.isaac.get("latency_frames", 2))
+        self.stamps = collections.deque(maxlen=self.latency + 1)  # the last frames' stamps
         log.info("lidar %s: %s at %s in base_link%s", rig.name, path, rig.translation,
                  " (kept from the last vehicle at this path)" if self.fresh else "")
 
@@ -104,7 +110,9 @@ class Lidar:
         if self.pending is not None:
             self.pub.publish(self.pending)
             self.ros.note_scan(self.pending.header.stamp)  # what the lockstep waits for
-        self.pending = self._msg(stamp)
+        self.stamps.append(stamp)
+        # the data read now was rendered `latency` frames ago: until then there is no stamp for it
+        self.pending = self._msg(self.stamps[0]) if len(self.stamps) > self.latency else None
 
     def _msg(self, stamp):
         d = self.annotator.get_data()
