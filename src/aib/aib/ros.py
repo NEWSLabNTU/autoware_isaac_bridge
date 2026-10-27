@@ -145,6 +145,7 @@ class EgoRos:
             def on_pose(msg):
                 ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
                 self.localized_ns = max(self.localized_ns or 0, ns)
+                self.misses = 0  # a pose: the run of timeouts is over
                 if not self.armed:
                     self.armed = True
                     log.info("lockstep: armed (the localizer's pose at %d ns)", ns)
@@ -213,8 +214,9 @@ class EgoRos:
                 self.stats["timeouts"] += 1
                 if self.misses >= ls["max_misses"]:
                     self.armed = False
-                    log.warning("lockstep: no pose for %d frames in a row; disarmed until the "
-                                "localizer publishes again", self.misses)
+                    log.warning("lockstep: no pose for %d frames in a row (the last scan at %d ns, "
+                                "the last pose at %d ns); disarmed until the localizer publishes "
+                                "again", self.misses, self.scan_ns, self.localized_ns or 0)
                 break
             self.executor.spin_once(timeout_sec=min(left, 0.005))
         else:
