@@ -55,11 +55,14 @@ class RigTest(unittest.TestCase):
         self.assertEqual(cfg.ecu, {})
         self.assertEqual(cfg.load_rig().name, "tesla_model3")
         self.assertEqual(cfg.control_topic, "/control/command/control_cmd")
+        self.assertEqual(cfg.lockstep, {})  # off: the world does not wait for Autoware
 
     def test_the_drift_cars_ego_config_takes_the_drift_controllers_command(self):
         cfg = EgoConfig.load(EGO.parent / "ego_drift_mustang.yaml")
         self.assertEqual(cfg.load_rig().name, "drift_mustang")
         self.assertEqual(cfg.control_topic, "/control/command/drift/control_cmd")
+        # the world waits for NDT's pose each frame (swb roadmap 057)
+        self.assertEqual(cfg.lockstep["topic"], "/localization/pose_estimator/pose_with_covariance")
 
     def test_clock_offset_is_refused_by_name(self):
         # Roadmap 051: stamps are sim time + BASE_NS; the key is gone, not ignored.

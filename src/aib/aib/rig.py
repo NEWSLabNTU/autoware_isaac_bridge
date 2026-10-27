@@ -128,6 +128,10 @@ class EgoConfig:
     # Where the vehicle takes Autoware's Control from. Another topic puts a node between
     # Autoware's command gate and the car (autoware-drift's drift_controller, swb roadmap 057).
     control_topic: str = "/control/command/control_cmd"
+    # The world waits for the ego's localizer before each frame (swb roadmap 057; aib.ros):
+    # {} off; {topic, timeout_s, max_misses} on, each defaulting to aib.ros.LOCKSTEP_DEFAULTS
+    # (Autoware's NDT pose, 1 s, 3).
+    lockstep: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path):

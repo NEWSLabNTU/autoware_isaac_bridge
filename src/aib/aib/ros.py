@@ -20,6 +20,15 @@ Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_
 Control from the ego config's `control_topic`, by default `/control/command/control_cmd`) and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
 
+With `lockstep` (the ego config's; swb roadmap 057) the world waits for the ego's localizer:
+before a frame takes its commands, `take_commands` blocks until the localizer has published a
+pose for the last lidar scan sent (a `PoseWithCovarianceStamped` on `lockstep.topic` stamped at
+the scan, as Autoware's NDT stamps its pose), at most `lockstep.timeout_s`. The simulation then
+runs as fast as the host lets the localizer keep up, as on a car whose computer is sized for its
+speed; on a busy host it slows instead of the localizer skipping scans. The wait arms on the
+localizer's first pose (no waiting before it localizes) and disarms after `max_misses` waits
+in a row time out (a localizer that stopped), until the next pose.
+
 Stamps are sim time plus BASE_NS (aib.sim_time; scenario-world-bridge roadmap 051): the
 integer every part of a run computes from the same time, clear of zero, where Autoware
 misbehaves. Time is monotonic within an episode only; a stack that sees `/clock` go back (a
@@ -37,6 +46,9 @@ from .control import Command, gear_from_command
 log = logging.getLogger("aib")
 
 MAX_CALLBACKS_PER_FRAME = 16
+LOCKSTEP_DEFAULTS = {"topic": "/localization/pose_estimator/pose_with_covariance",
+                     "timeout_s": 1.0, "max_misses": 3}
+LOCKSTEP_REPORT_S = 30.0  # wall seconds between the lockstep's log lines
 DEFAULT_TOPICS = {
     "lidar": "/sensing/lidar/top/pointcloud_before_sync",
     "imu": "/sensing/imu/imu_link/imu_raw",
@@ -46,7 +58,7 @@ DEFAULT_TOPICS = {
 
 class EgoRos:
     def __init__(self, domain=1, rig=None, node_name="isaac_vehicle",
-                 control_topic="/control/command/control_cmd"):
+                 control_topic="/control/command/control_cmd", lockstep=None):
         import rclpy
         from autoware_control_msgs.msg import Control
         from autoware_vehicle_msgs.msg import (ControlModeReport, GearCommand, GearReport,
@@ -122,12 +134,32 @@ class EgoRos:
         n.create_subscription(TurnIndicatorsCommand, "/control/command/turn_indicators_cmd", on_turn, reliable)
         n.create_subscription(HazardLightsCommand, "/control/command/hazard_lights_cmd", on_hazard, reliable)
         n.create_service(ControlModeCommand, "/control/control_mode_request", on_mode)
+        self.lockstep = None
+        if lockstep:
+            unknown = set(lockstep) - set(LOCKSTEP_DEFAULTS)
+            if unknown:
+                raise ValueError(f"lockstep: unknown key(s) {sorted(unknown)}")
+            self.lockstep = {**LOCKSTEP_DEFAULTS, **lockstep}
+            from geometry_msgs.msg import PoseWithCovarianceStamped
+
+            def on_pose(msg):
+                ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+                self.localized_ns = max(self.localized_ns or 0, ns)
+                if not self.armed:
+                    self.armed = True
+                    log.info("lockstep: armed (the localizer's pose at %d ns)", ns)
+
+            n.create_subscription(PoseWithCovarianceStamped, self.lockstep["topic"], on_pose,
+                                  reliable)
+            log.info("lockstep: each frame waits up to %.2f s for a pose on %s",
+                     self.lockstep["timeout_s"], self.lockstep["topic"])
+        self._reset_lockstep()
         log.info("ego ROS 2 side on domain %d", domain)
 
     @classmethod
     def from_config(cls, cfg, rig=None):
-        return cls(domain=cfg.domain, rig=rig,
-                   node_name=cfg.node_name, control_topic=cfg.control_topic)
+        return cls(domain=cfg.domain, rig=rig, node_name=cfg.node_name,
+                   control_topic=cfg.control_topic, lockstep=cfg.lockstep)
 
     def sensor_publisher(self, s):
         """The publisher(s) for a SensorRig, made on first use: (main, info or None)."""
@@ -149,6 +181,59 @@ class EgoRos:
         self.cmd = Command()
         self.turn = 1  # TurnIndicatorsReport.DISABLE
         self.hazard = 1  # HazardLightsReport.DISABLE
+        self._reset_lockstep()
+
+    def _reset_lockstep(self):
+        """A new ego, or a new episode (time may start again): nothing sent, nothing matched."""
+        self.scan_ns = None  # the stamp of the last lidar scan sent
+        self.localized_ns = None  # the newest stamp the localizer published a pose for
+        self.armed = False
+        self.misses = 0
+        self.stats = {"frames": 0, "waited": 0.0, "max": 0.0, "timeouts": 0}
+        self.reported_at = None
+
+    def note_scan(self, stamp):
+        """A lidar scan went out at `stamp` (builtin_interfaces Time)."""
+        self.scan_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
+
+    def wait_localized(self):
+        """The lockstep: block until the localizer has a pose for the last scan sent, at most
+        `timeout_s`. Returns the seconds waited."""
+        import time
+
+        ls = self.lockstep
+        if not ls or not self.armed or self.scan_ns is None:
+            return 0.0
+        start = time.perf_counter()
+        deadline = start + ls["timeout_s"]
+        while (self.localized_ns or 0) < self.scan_ns:
+            left = deadline - time.perf_counter()
+            if left <= 0:
+                self.misses += 1
+                self.stats["timeouts"] += 1
+                if self.misses >= ls["max_misses"]:
+                    self.armed = False
+                    log.warning("lockstep: no pose for %d frames in a row; disarmed until the "
+                                "localizer publishes again", self.misses)
+                break
+            self.executor.spin_once(timeout_sec=min(left, 0.005))
+        else:
+            self.misses = 0
+        waited = time.perf_counter() - start
+        st = self.stats
+        st["frames"] += 1
+        st["waited"] += waited
+        st["max"] = max(st["max"], waited)
+        now = time.perf_counter()
+        if self.reported_at is None:
+            self.reported_at = now
+        elif now - self.reported_at >= LOCKSTEP_REPORT_S:
+            log.info("lockstep: %d frames, waited %.1f ms a frame (max %.0f ms), %d timed out",
+                     st["frames"], 1e3 * st["waited"] / st["frames"], 1e3 * st["max"],
+                     st["timeouts"])
+            self.stats = {"frames": 0, "waited": 0.0, "max": 0.0, "timeouts": 0}
+            self.reported_at = now
+        return waited
 
     def publish_clock(self, sim_time):
         """`/clock` at `sim_time` (s); returns that stamp."""
@@ -158,7 +243,10 @@ class EgoRos:
 
     def take_commands(self):
         """Run the callbacks that are ready, without waiting: one per `spin_once`, and a frame
-        sees a handful (control at 30 Hz, the rest at 10 Hz, against 20 frames a second)."""
+        sees a handful (control at 30 Hz, the rest at 10 Hz, against 20 frames a second). With
+        `lockstep`, first wait for the localizer (`wait_localized`); with several egos the
+        later calls find it done."""
+        self.wait_localized()
         for _ in range(MAX_CALLBACKS_PER_FRAME):
             self.executor.spin_once(timeout_sec=0)
 

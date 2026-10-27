@@ -103,6 +103,7 @@ class Lidar:
     def publish(self, state, sim_time, stamp):
         if self.pending is not None:
             self.pub.publish(self.pending)
+            self.ros.note_scan(self.pending.header.stamp)  # what the lockstep waits for
         self.pending = self._msg(stamp)
 
     def _msg(self, stamp):
