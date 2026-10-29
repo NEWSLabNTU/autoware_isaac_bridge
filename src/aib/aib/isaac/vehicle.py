@@ -207,9 +207,12 @@ class Vehicle:
             comp = PhysxSchema.PhysxVehicleSuspensionComplianceAPI.Apply(wprim)
             comp.CreateWheelToeAngleAttr([])
             comp.CreateWheelCamberAngleAttr([])
-            app_point = Gf.Vec4f(0.0, 0.0, 0.0, r - frame_z)
-            comp.CreateSuspensionForceAppPointAttr([app_point])
-            comp.CreateTireForceAppPointAttr([app_point])
+            # The suspension pushes at the wheel's centre; the tire at its contact patch, the
+            # ground under it, so its force pitches and rolls the body about the CoM's whole
+            # height as a real tyre's does (at the centre: a third of the load transfer, swb
+            # issue 023).
+            comp.CreateSuspensionForceAppPointAttr([Gf.Vec4f(0.0, 0.0, 0.0, r - frame_z)])
+            comp.CreateTireForceAppPointAttr([Gf.Vec4f(0.0, 0.0, 0.0, -frame_z)])
             ctl = PhysxSchema.PhysxVehicleWheelControllerAPI.Apply(wprim)
             self.wheels.append((is_front, ctl.CreateDriveTorqueAttr(0.0),
                                 ctl.CreateBrakeTorqueAttr(0.0), ctl.CreateSteerAngleAttr(0.0)))
