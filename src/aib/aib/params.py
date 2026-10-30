@@ -64,7 +64,7 @@ class VehicleParams:
     sticky_tire_threshold_speed: float = 0.2
     sticky_tire_threshold_time: float = 1.0
     longitudinal_sticky_tire_damping: float = 200.0
-    lateral_sticky_tire_damping: float = 20.0
+    lateral_sticky_tire_damping: float = 200.0
 
     @classmethod
     def from_dict(cls, values, overrides=None):
