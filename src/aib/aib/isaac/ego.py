@@ -28,11 +28,12 @@ WARM_UP_FRAMES = 60
 
 class Ego:
     def __init__(self, rig, ros, stage, path, pose, name="ego", box_center=None, box_dims=None,
-                 params=None):
+                 params=None, projector=None):
         """`rig`: an aib.rig.Rig; `ros`: an aib.ros.EgoRos (made once per process); `path`:
         the prim path of the vehicle; `pose`: ((x, y, z), (w, x, y, z)) of base_link.
         `box_center`/`box_dims` override the rig's chassis box (a scenario's declared box),
-        `params` its VehicleParams."""
+        `params` its VehicleParams. `projector` (aib.frames.Projector) turns the world into
+        the GNSS's lat/lon; none: TransverseMercator at (0, 0), the world being the map."""
         self.rig = rig
         self.name = name
         self.path = path
@@ -43,6 +44,8 @@ class Ego:
         self.sensors = [sensor_kinds.make(s, ros, stage, path)
                         for s in rig.sensors.values() if s.enabled]
         for s in self.sensors:
+            if hasattr(s, "projector"):
+                s.projector = projector
             s.before_substep(self.vehicle, self.state, 0.0)
         ros.reset()
 

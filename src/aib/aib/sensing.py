@@ -27,9 +27,12 @@ def imu_reading(state, q_base_imu):
     return qmul(state.quat, q_base_imu), gyro, acc
 
 
-def gnss_reading(state, t_base_gnss):
-    """(lat, lon, altitude) of the antenna at `t_base_gnss` in base_link."""
+def gnss_reading(state, t_base_gnss, projector=None):
+    """(lat, lon, altitude) of the antenna at `t_base_gnss` in base_link, by the map's
+    projector (an aib.frames.Projector; none: TransverseMercator at (0, 0))."""
     p = tuple(a + b for a, b in zip(state.position, qrot(state.quat, t_base_gnss)))
+    if projector is not None:
+        return projector.lat_lon_alt(*p)
     lat, lon = lat_lon(p[0], p[1])
     return lat, lon, float(p[2])
 

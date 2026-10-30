@@ -74,6 +74,31 @@ class GnssTest(unittest.TestCase):
         self.assertAlmostEqual(math.radians(lat) * frames.EARTH_RADIUS, 1.0, places=6)
         self.assertAlmostEqual(alt, 1.5)
 
+    def test_mgrs_square_corner(self):
+        # 51RUH: zone 51 (column set STUVWXYZ, U = 300 km), odd zone (H = 700 km), band R
+        # (24-32 N) puts the square in the second 2000 km cycle
+        self.assertEqual(frames.mgrs_origin("51RUH"), (51, True, 300_000.0, 2_700_000.0))
+
+    def test_mgrs_projector_matches_the_maps_own_lat_lon(self):
+        # node 1 of the NTU r02 Lanelet2 map, as its MGRS 51RUH tooling wrote it; the world is
+        # the map less map_origin (scenario-world-bridge roadmap 059)
+        p = frames.Projector((52_500.0, 67_700.0, 0.0), "51RUH")
+        lat, lon, alt = p.lat_lon_alt(52217.4936 - 52_500.0, 67651.6452 - 67_700.0, 11.8783)
+        north = (lat - 25.01720437293) * 111_320.0
+        east = (lon - 121.53539682005) * 111_320.0 * math.cos(math.radians(lat))
+        self.assertLess(math.hypot(north, east), 0.002)
+        self.assertAlmostEqual(alt, 11.8783)
+
+    def test_the_reading_takes_the_projector(self):
+        p = frames.Projector((52_500.0, 67_700.0, 0.0), "51RUH")
+        s = State(position=(-282.5064, -48.3548, 11.8783), quat=(1.0, 0.0, 0.0, 0.0))
+        self.assertEqual(gnss_reading(s, (0.0, 0.0, 0.0), p),
+                         p.lat_lon_alt(-282.5064, -48.3548, 11.8783))
+
+    def test_no_projector_file_is_the_old_frame(self):
+        p = frames.Projector.from_map("/nonexistent")
+        self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
+
 
 class CloudTest(unittest.TestCase):
     def test_layout(self):

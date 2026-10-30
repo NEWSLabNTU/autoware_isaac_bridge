@@ -37,7 +37,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.params` | - | `VehicleParams`; axle loads, brake split, suspension rates, inertia; geometry check |
 | `aib.control` | - | `Command`, `State`, gears, the steering actuator, Ackermann |
 | `aib.deps` | - | `deps/sim_vehicle_spec` and `deps/sim_vehicle_ecu` on `sys.path` |
-| `aib.frames` | - | quaternions, URDF rpy, transforms, lat/lon about the map origin |
+| `aib.frames` | - | quaternions, URDF rpy, transforms, the GNSS projector (MGRS or TransverseMercator at 0, 0) |
 | `aib.sensing` | numpy | IMU and GNSS readings from the state, the PointCloud2 layout, periodic timers |
 | `aib.rig` | yaml | `Rig`, `SensorRig`, `EgoConfig` |
 | `aib.ros` | Isaac's rclpy + Autoware msgs | `EgoRos`: the vehicle interface, the sensor publishers and the host's traffic signals on one domain |
@@ -223,7 +223,7 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 | lidar | RTX lidar (`isaacsim.sensors.experimental.rtx`), the rig's `isaac.config` / `variant` | PointCloud2 x y z intensity return_type channel | channel from the elevation's rank among `channels`; stamped at its render (`isaac.latency_frames`), sent one frame late |
 | camera | USD camera + `rgb` annotator, focal length from the horizontal FOV | Image rgb8 + CameraInfo (K from the spec) | off in the shipped rig; untested on Isaac |
 | imu | from the state | Imu: orientation, angular velocity, specific force (acceleration minus gravity) in the IMU frame | every frame unless `rate_hz` |
-| gnss | from the state | NavSatFix, GBAS fix, lat/lon about the map origin (TransverseMercator at 0, 0) | `rate_hz` (10) |
+| gnss | from the state | NavSatFix, GBAS fix, lat/lon by the map's projector: MGRS about `map_origin` with `world:=<map>/isaac/world.yaml`, else TransverseMercator at (0, 0) | `rate_hz` (10) |
 
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),

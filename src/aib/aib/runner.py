@@ -1,6 +1,6 @@
 """aib's standalone runner: one ego in an Isaac world, no swb, no SSv2.
 
-    python -m aib.runner --ego config/ego.yaml [--world <usd>] [--pose x,y,z,yaw]
+    python -m aib.runner --ego config/ego.yaml [--world <usd> | <world.yaml>] [--pose x,y,z,yaw]
         [--frame-rate 20] [--physics-dt 0.016667] [--display :8] [--realtime] [--duration s]
         [--signals <map dir> [--green-s 10] [--amber-s 3]]
 
@@ -11,6 +11,12 @@ yaw in rad) and steps the world in fixed frames forever (or `--duration` s of si
 publishing `/clock`, the vehicle status and the sensors on the ego's domain and applying
 Autoware's commands -- what swb's world server does for its ego, without a scenario.
 Autoware on the same domain: `just autoware` (aib_launch isaac_simulator.launch.xml).
+
+`--world` takes a USD, or a map's `isaac/world.yaml` (its `usd:` and `map_origin`, the world
+being the map less it; swb_isaac_world reads the same file). With a world.yaml the GNSS is
+projected as the map is (`<map>/map_projector_info.yaml`, MGRS or none: aib.frames.Projector)
+about `map_origin`, so Autoware's GNSS initialization finds the ego on the map; with a USD or
+no world, about (0, 0) as before. `--pose` is in the world frame.
 
 `--realtime` paces frames to the wall clock; without it the world runs as fast as it can,
 which Autoware follows through `/clock`.
@@ -39,10 +45,31 @@ def parse_pose(text):
     return (x, y, z), (math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2))
 
 
+def world_files(world):
+    """(USD path or "", Projector or None) for `--world`: a USD as it is; a world.yaml's `usd:`
+    (relative to the file) with its map's projector about its `map_origin` (the map dir is the
+    one holding isaac/)."""
+    if not world:
+        return "", None
+    if not world.endswith((".yaml", ".yml")):
+        return os.path.realpath(world), None
+    import yaml
+
+    from .frames import Projector
+
+    with open(world) as f:
+        w = yaml.safe_load(f) or {}
+    here = os.path.dirname(os.path.realpath(world))
+    usd = os.path.realpath(os.path.join(here, w["usd"]))
+    origin = tuple(w.get("map_origin") or (0.0, 0.0, 0.0))
+    return usd, Projector.from_map(os.path.dirname(here), origin)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--ego", required=True, help="ego config YAML (config/ego.yaml)")
-    ap.add_argument("--world", default="", help="USD stage to drive in; empty: a ground plane")
+    ap.add_argument("--world", default="",
+                    help="USD stage, or a map's isaac/world.yaml, to drive in; empty: a ground plane")
     ap.add_argument("--pose", type=parse_pose, default=parse_pose("0,0,0.05,0"),
                     help="x,y,z,yaw of base_link in the world (m, rad)")
     ap.add_argument("--frame-rate", type=float, default=20.0, help="frames per second (Hz)")
@@ -105,15 +132,17 @@ def main(argv=None):
     ros.publish_clock(0.0)
     world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
     stage = omni.usd.get_context().get_stage()
-    if args.world:
-        add_reference_to_stage(usd_path=os.path.realpath(args.world), prim_path="/World/env")
+    usd, projector = world_files(args.world)
+    log.info("GNSS projector: %s", projector.name if projector else "TransverseMercator at (0, 0)")
+    if usd:
+        add_reference_to_stage(usd_path=usd, prim_path="/World/env")
     else:
         world.scene.add_default_ground_plane()
     ensure_vehicle_scene(stage)
     world.reset()
     world.play()
     physx = omni.physx.get_physx_interface()
-    ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name)
+    ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name, projector=projector)
     # The chassis box is the collider, not a body: the roof lidar sees it (11400 points of
     # the ego itself in Autoware's obstacle cloud, which then stops for "route-obstacle"), so
     # hide it from rendering as swb does when it puts a catalogue body on the ego.

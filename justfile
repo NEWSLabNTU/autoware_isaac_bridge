@@ -80,7 +80,8 @@ check: test
 
 # Run one ego in an Isaac world, no swb/SSv2 (Isaac's Python). Settings as name:=value:
 #   ego:=<yaml>      ego config (default src/aib/config/ego.yaml)
-#   world:=<usd>     the stage to drive in, with its colliders; empty: a flat ground plane
+#   world:=<usd>     the stage to drive in, with its colliders; empty: a flat ground plane;
+#                    or a map's isaac/world.yaml: its usd, and the GNSS by the map's projector
 #   pose:=x,y,z,yaw  base_link's start in the world (default 0,0,0.05,0)
 #   realtime:=true   pace frames to the wall clock
 #   duration:=<s>    stop after this much sim time

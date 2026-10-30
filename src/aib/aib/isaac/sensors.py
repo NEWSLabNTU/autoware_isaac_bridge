@@ -253,12 +253,14 @@ class Imu:
 
 
 class Gnss:
-    """From the vehicle's pose: a GBAS fix at the antenna, about the map origin."""
+    """From the vehicle's pose: a GBAS fix at the antenna, by the map's projector (`projector`,
+    set by Ego; none: TransverseMercator at (0, 0))."""
 
     renders = False
 
     def __init__(self, rig, ros, stage=None, vehicle_path=None):
         self.rig, self.ros = rig, ros
+        self.projector = None
         self.pub, _ = ros.sensor_publisher(rig)
         self.timer = Periodic(rig.period or 0.1)
 
@@ -268,7 +270,7 @@ class Gnss:
     def publish(self, state, sim_time, stamp):
         if not self.timer.due(sim_time):
             return
-        lat, lon, alt = gnss_reading(state, self.rig.translation)
+        lat, lon, alt = gnss_reading(state, self.rig.translation, self.projector)
         msg = self.ros.m["NavSatFix"]()
         msg.header.stamp = stamp
         msg.header.frame_id = self.rig.frame
