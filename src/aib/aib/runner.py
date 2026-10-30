@@ -47,8 +47,8 @@ def parse_pose(text):
 
 def world_files(world):
     """(USD path or "", Projector or None) for `--world`: a USD as it is; a world.yaml's `usd:`
-    (relative to the file) with its map's projector about its `map_origin` (the map dir is the
-    one holding isaac/)."""
+    (relative to the map dir, the one holding isaac/, as swb_isaac_world resolves it) with the
+    map's projector about the file's `map_origin`."""
     if not world:
         return "", None
     if not world.endswith((".yaml", ".yml")):
@@ -59,10 +59,10 @@ def world_files(world):
 
     with open(world) as f:
         w = yaml.safe_load(f) or {}
-    here = os.path.dirname(os.path.realpath(world))
-    usd = os.path.realpath(os.path.join(here, w["usd"]))
+    map_dir = os.path.dirname(os.path.dirname(os.path.realpath(world)))
+    usd = os.path.realpath(os.path.join(map_dir, w["usd"]))
     origin = tuple(w.get("map_origin") or (0.0, 0.0, 0.0))
-    return usd, Projector.from_map(os.path.dirname(here), origin)
+    return usd, Projector.from_map(map_dir, origin)
 
 
 def main(argv=None):
