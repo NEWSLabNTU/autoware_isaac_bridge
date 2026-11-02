@@ -54,6 +54,9 @@ class CheckTest(unittest.TestCase):
         rig = Rig.load(RIG)
         self.assertEqual(rig.spec_hash, gen.specmod.spec_hash(gen.specmod.load(SPEC)))
         self.assertIn(rig.spec_hash, head)
+        # the skid plate's height, only where the spec gives one
+        self.assertEqual(rig.ground_clearance, 0.138)
+        self.assertNotIn("ground_clearance", gen.outputs()["src/aib/config/drift_mustang.rig.yaml"])
 
 
 class AgreesWithAutowareTest(unittest.TestCase):

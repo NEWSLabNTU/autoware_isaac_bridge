@@ -39,7 +39,8 @@ class Ego:
         self.path = path
         self.ros = ros
         self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.ecu,
-                               box_center or rig.box_center, box_dims or rig.box_dims, pose)
+                               box_center or rig.box_center, box_dims or rig.box_dims, pose,
+                               ground_clearance=rig.ground_clearance)
         self.state = State()
         self.sensors = [sensor_kinds.make(s, ros, stage, path)
                         for s in rig.sensors.values() if s.enabled]

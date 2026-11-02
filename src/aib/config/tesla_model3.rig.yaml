@@ -1,4 +1,4 @@
-# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 471b03c3e3b2bf688e3d9fa5b17ccf6cb084fcdb8a4547da18221654baf90d69) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 480be4fd0d00a6b1c2b1ae697ac2c58795dbd9a7d693a62088d3a3023aa486f4) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/tesla_model3.yaml
@@ -9,11 +9,12 @@ assumptions: [brakes.abs, brakes.dead_time, brakes.time_constant, carla.physics.
   powertrain.regen_fade_speeds, powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control,
   resistance.frontal_area, resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip,
   wheels.mass]
-spec_hash: 471b03c3e3b2bf688e3d9fa5b17ccf6cb084fcdb8a4547da18221654baf90d69
+spec_hash: 480be4fd0d00a6b1c2b1ae697ac2c58795dbd9a7d693a62088d3a3023aa486f4
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.416, 0.0, 0.744]
   box_dims: [4.792, 2.163, 1.488]
+  ground_clearance: 0.138
 vehicle:
   model: vehicle.tesla.model3
   wheel_base: 3.005

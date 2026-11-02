@@ -55,6 +55,7 @@ use("sim_vehicle_ecu")
 from sim_vehicle_ecu import Calibration, Ecu, Request, Sensors  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
+PLATE_THICKNESS = 0.04  # m, the skid plate (its bottom is what counts)
 STIFFNESS_STEP = 0.02  # a stiffness share closer than this to the one written is not written
 TIRE_FRICTION = "/World/vehicleTireFriction"
 WHEELS = (("frontLeft", True, 1), ("frontRight", True, -1), ("rearLeft", False, 1),
@@ -101,9 +102,10 @@ def ensure_vehicle_scene(stage):
 
 class Vehicle:
     def __init__(self, stage, path, params: VehicleParams, calibration: Calibration, box_center,
-                 box_dims, pose):
+                 box_dims, pose, ground_clearance=0.0):
         """`params`: the PhysX vehicle (a rig's `vehicle`); `calibration`: its onboard
-        computers' (a rig's `ecu`)."""
+        computers' (a rig's `ecu`); `ground_clearance`: the underbody's height (a rig's), where
+        a skid plate goes (0: none)."""
         self.stage = stage
         self.path = path
         self.p = p = params
@@ -237,6 +239,24 @@ class Vehicle:
         UsdPhysics.CollisionGroup.Get(stage, f"{GROUPS}/chassis").GetCollidersCollectionAPI() \
             .CreateIncludesRel().AddTarget(cube.GetPath())
         self.body_path = cube.GetPath()
+        # The underbody: the box stays clear of the road, so a rock or a ridge would pass under
+        # it. A real car's lowest point is between the axles at its ground clearance, so a
+        # plate goes there, clear of the wheels and their steering (each side 5 cm inside the
+        # tire), bottom at the clearance over base_link: the body rests within 2 mm of that on
+        # its tires (roadmap 066 R4). Hidden: the roof lidar must not see the ego.
+        self.plate_path = None
+        if ground_clearance > 0:
+            plate = UsdGeom.Cube.Define(stage, f"{path}/skid_plate")
+            plate.CreateSizeAttr(1.0)
+            UsdGeom.XformCommonAPI(plate.GetPrim()).SetTranslate(
+                Gf.Vec3d(p.wheel_base / 2, 0.0, ground_clearance + PLATE_THICKNESS / 2))
+            UsdGeom.XformCommonAPI(plate.GetPrim()).SetScale(Gf.Vec3f(
+                p.wheel_base - 2 * r, p.wheel_tread - p.wheel_width - 0.1, PLATE_THICKNESS))
+            UsdPhysics.CollisionAPI.Apply(plate.GetPrim())
+            UsdPhysics.CollisionGroup.Get(stage, f"{GROUPS}/chassis").GetCollidersCollectionAPI() \
+                .CreateIncludesRel().AddTarget(plate.GetPath())
+            UsdGeom.Imageable(plate.GetPrim()).MakeInvisible()
+            self.plate_path = plate.GetPath()
         self.tire_angle = 0.0
         self.torques = None  # the last step's sim_vehicle_ecu.Actuation
         self.last = None  # (position, quat, velocity in world) of the last substep

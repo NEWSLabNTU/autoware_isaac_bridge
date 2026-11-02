@@ -52,6 +52,7 @@ class Rig:
     box_center: tuple
     box_dims: tuple
     catalogue_model: str = ""
+    ground_clearance: float = 0.0  # m, the skid plate's height; 0: no plate
     sensors: dict = field(default_factory=dict)  # name -> SensorRig
     assumptions: list = field(default_factory=list)
     spec_hash: str = ""  # the sim_vehicle_spec spec this rig was generated from
@@ -92,6 +93,7 @@ class Rig:
                    box_center=tuple(body.get("box_center", (1.5, 0.0, 0.75))),
                    box_dims=tuple(body.get("box_dims", (4.8, 2.1, 1.5))),
                    catalogue_model=body.get("catalogue_model", ""),
+                   ground_clearance=float(body.get("ground_clearance") or 0.0),
                    sensors=sensors, assumptions=list(doc.get("assumptions") or []),
                    spec_hash=spec_hash, path=str(path))
 

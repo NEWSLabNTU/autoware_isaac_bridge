@@ -72,6 +72,7 @@ def vehicle_params(spec):
 
 def rig(spec, header, spec_rel):
     center, dims = specmod.box(spec)
+    gc = spec.section("body").get("ground_clearance")
     sensors = {}
     for name, s in specmod.sensors(spec).items():
         (t, q) = s["base_link"]
@@ -93,7 +94,8 @@ def rig(spec, header, spec_rel):
         "assumptions": specmod.assumptions(spec),
         "spec_hash": specmod.spec_hash(spec),
         "body": {"catalogue_model": spec.section("body").get("catalogue_model", ""),
-                 "box_center": list(center), "box_dims": list(dims)},
+                 "box_center": list(center), "box_dims": list(dims),
+                 **({"ground_clearance": gc} if gc else {})},
         "vehicle": vehicle_params(spec).to_dict(),
         "sensors": sensors,
     }
