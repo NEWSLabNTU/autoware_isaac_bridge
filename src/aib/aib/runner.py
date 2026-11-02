@@ -45,6 +45,28 @@ def parse_pose(text):
     return (x, y, z), (math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2))
 
 
+# swb_isaac_world's default sun and sky (its world.py: SUN, SKY, SUN_ROTATE), for a world that
+# brings no light of its own, as the world server adds them
+SUN, SKY = "/World/sun", "/World/sky"
+SUN_ROTATE = (-50.0, 20.0, 30.0)
+
+
+def ensure_light(stage):
+    """Light a stage that has no light: an RTX camera renders a lightless stage black (the
+    NTU twin's world has none; scenario-world-bridge roadmap 059). The lidar needs none.
+    Returns whether it added them."""
+    from pxr import Gf, UsdGeom, UsdLux
+
+    if any(p.HasAPI(UsdLux.LightAPI) for p in stage.Traverse()):
+        return False
+    sun = UsdLux.DistantLight.Define(stage, SUN)
+    sun.CreateIntensityAttr(2500.0)
+    sun.CreateAngleAttr(1.0)
+    UsdGeom.XformCommonAPI(sun.GetPrim()).SetRotate(Gf.Vec3f(*SUN_ROTATE))
+    UsdLux.DomeLight.Define(stage, SKY).CreateIntensityAttr(600.0)
+    return True
+
+
 def world_files(world):
     """(USD path or "", Projector or None) for `--world`: a USD as it is; a world.yaml's `usd:`
     (relative to the map dir, the one holding isaac/, as swb_isaac_world resolves it) with the
@@ -138,6 +160,8 @@ def main(argv=None):
         add_reference_to_stage(usd_path=usd, prim_path="/World/env")
     else:
         world.scene.add_default_ground_plane()
+    if ensure_light(stage):
+        log.info("the world brings no light: a default sun and sky added")
     ensure_vehicle_scene(stage)
     world.reset()
     world.play()
