@@ -1,4 +1,4 @@
-# Generated from sim_vehicle_spec/vehicles/drift_mustang.yaml (spec_hash 1816a24d44d1c9a311fe76471d9c46563182ebff1e893c34bf22d21f88f87cec) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/drift_mustang.yaml (spec_hash 65f1ba86a28fd88003747a5fb8a5ab8df0ab11c55e778a4b7ea1f9ab553c40ae) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/drift_mustang.yaml
@@ -7,7 +7,7 @@ description: 1966 Mustang drift build (light, 50:50, 330 kW rear motor, locked r
   no ABS/TC/ESC) on the CARLA vehicle.ford.mustang body
 assumptions: [brakes, carla.physics, geometry.max_steer_angle, inertia.com_front_fraction, inertia.com_height,
   inertia.inertia_box, inertia.mass, powertrain, resistance, suspension, tires.friction_vs_slip]
-spec_hash: 1816a24d44d1c9a311fe76471d9c46563182ebff1e893c34bf22d21f88f87cec
+spec_hash: 65f1ba86a28fd88003747a5fb8a5ab8df0ab11c55e778a4b7ea1f9ab553c40ae
 body:
   catalogue_model: vehicle.ford.mustang
   box_center: [1.356, 0.0, 0.6505]
@@ -77,6 +77,20 @@ sensors:
     rate_hz: 10.0
     info_topic: /sensing/camera/camera6/camera_info
     k: [841.642725165, 0.0, 640.0, 0.0, 841.642725165, 360.0, 0.0, 0.0, 1.0]
+  zed_left:
+    type: camera
+    enabled: true
+    link: zed_left/camera_link
+    frame: zed_left/camera_optical_link
+    topic: /sensing/camera/zed/image_raw
+    translation: [1.45, 0.0, 1.2]
+    quat: [1.0, 0.0, 0.0, 0.0]
+    width: 960
+    height: 600
+    horizontal_fov: 110.0
+    rate_hz: 30.0
+    info_topic: /sensing/camera/zed/camera_info
+    k: [336.099618341, 0.0, 480.0, 0.0, 336.099618341, 300.0, 0.0, 0.0, 1.0]
   imu:
     type: imu
     enabled: true

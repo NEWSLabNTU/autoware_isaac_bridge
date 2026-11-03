@@ -1,11 +1,12 @@
 """The rig and ego config as the Isaac side loads them, and the sensor kit launch against
 the spec's topics. Pure."""
+import math
 import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from _paths import EGO, REPO, RIG
+from _paths import EGO, PKG, REPO, RIG
 from aib.rig import EgoConfig, Rig
 
 KIT = REPO / "deps/autoware_sim_vehicle/cars/tesla_model3/tesla_model3_sensor_kit_launch/launch"
@@ -24,6 +25,20 @@ class RigTest(unittest.TestCase):
         self.assertAlmostEqual(r.sensors["gnss"].period, 0.1)
         self.assertEqual(r.sensors["imu"].period, 0.0)
         self.assertIn("tires", r.assumptions)
+
+    def test_the_mustangs_zed_left(self):
+        r = Rig.load(PKG / "config/drift_mustang.rig.yaml")
+        z = r.sensors["zed_left"]
+        self.assertTrue(z.enabled)
+        self.assertEqual(z.topic, "/sensing/camera/zed/image_raw")
+        self.assertEqual(z.extra["info_topic"], "/sensing/camera/zed/camera_info")
+        self.assertEqual((z.extra["width"], z.extra["height"]), (960, 600))
+        self.assertAlmostEqual(z.period, 1 / 30)
+        self.assertEqual(z.extra["rate_hz"], 30.0)
+        fx = 480 / math.tan(math.radians(55))
+        for a, b in zip(z.extra["k"], [fx, 0, 480, 0, fx, 300, 0, 0, 1]):
+            self.assertAlmostEqual(a, b, places=6)
+        self.assertEqual([x.name for x in r.of_type("camera")], ["zed_left"])
 
     def test_overrides(self):
         r = Rig.load(RIG, {"tire_friction": 0.7}, {"camera6": {"enabled": True},
