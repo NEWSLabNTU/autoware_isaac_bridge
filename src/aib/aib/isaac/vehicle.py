@@ -245,6 +245,7 @@ class Vehicle:
         # tire), bottom at the clearance over base_link: the body rests within 2 mm of that on
         # its tires (roadmap 066 R4). Hidden: the roof lidar must not see the ego.
         self.plate_path = None
+        self.ground_clearance = ground_clearance
         if ground_clearance > 0:
             plate = UsdGeom.Cube.Define(stage, f"{path}/skid_plate")
             plate.CreateSizeAttr(1.0)
