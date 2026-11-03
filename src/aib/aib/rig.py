@@ -18,7 +18,7 @@ use("sim_vehicle_spec", "sim_vehicle_ecu")
 
 from sim_vehicle_ecu import Calibration  # noqa: E402
 
-SENSOR_OVERRIDES = ("enabled", "topic", "frame", "rate_hz", "isaac")
+SENSOR_OVERRIDES = ("enabled", "topic", "frame", "rate_hz", "isaac", "auto_exposure")
 
 
 @dataclass
@@ -80,6 +80,12 @@ class Rig:
                 s["isaac"] = {**(s.get("isaac") or {}), **over.pop("isaac")}
             s.update(over)
             core = {k: s.pop(k) for k in ("type", "enabled", "link", "frame", "topic")}
+            if core["type"] == "camera" and not s.get("k"):
+                # a camera rig written by hand may leave K out: the pinhole of its size and
+                # field of view, as `just generate` writes it (CameraInfo refuses an empty K)
+                from sim_vehicle_spec import spec as specmod
+
+                s["k"] = specmod.camera_intrinsics(s["width"], s["height"], s["horizontal_fov"])
             t, q = tuple(s.pop("translation")), tuple(s.pop("quat"))
             isaac = s.pop("isaac", {}) or {}
             sensors[name] = SensorRig(name=name, translation=t, quat=q, extra=s, isaac=isaac,

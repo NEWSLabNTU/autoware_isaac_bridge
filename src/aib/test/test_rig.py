@@ -55,6 +55,19 @@ class RigTest(unittest.TestCase):
         with self.assertRaises(ValueError):  # a calibration field is not a PhysX one
             Rig.load(RIG, {"esc_enabled": True})
 
+    def test_a_camera_without_k_gets_its_pinhole(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "r.yaml"
+            text = RIG.read_text()
+            text = re.sub(r"\n    k: \[[^\]]*\]", "", text, count=1)
+            p.write_text(text)  # its spec: is relative to deps/, as the original's
+            r = Rig.load(p, None, {"camera6": {"auto_exposure": True}})
+        c = r.sensors["camera6"]
+        self.assertTrue(c.extra["auto_exposure"])
+        fx = 640 / math.tan(math.radians(74.5 / 2))
+        for a, b in zip(c.extra["k"], [fx, 0, 640, 0, fx, 360, 0, 0, 1]):
+            self.assertAlmostEqual(a, b, places=6)
+
     def test_a_stale_rig_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "r.yaml"

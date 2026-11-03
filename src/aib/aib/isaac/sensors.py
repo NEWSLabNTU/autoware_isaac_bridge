@@ -148,7 +148,12 @@ class Lidar:
 
 class Camera:
     """A pinhole RGB camera: Image (rgb8) and CameraInfo at the rig's rate. Not exercised
-    by swb's runs yet (its traffic lights reach Autoware by V2X): off in the shipped rig."""
+    by swb's runs yet (its traffic lights reach Autoware by V2X): off in the shipped rig.
+
+    `auto_exposure: true` (the rig's, or an ego config's override) gives it RTX's auto-exposure,
+    as a real camera has: without it a fixed exposure leaves the shade under trees nearly
+    black next to a sunlit road (swb roadmap 059). On Isaac 6.1 that is the camera prim's
+    OmniRtxCameraAutoExposureAPI_1, not the global /rtx/post/histogram setting."""
 
     renders = True
 
@@ -170,6 +175,12 @@ class Camera:
         cam.CreateVerticalApertureAttr(APERTURE_MM * self.height / self.width)
         cam.CreateFocalLengthAttr(APERTURE_MM / (2 * math.tan(hfov / 2)))
         cam.CreateClippingRangeAttr(Gf.Vec2f(0.1, 1000.0))
+        if rig.extra.get("auto_exposure"):
+            from pxr import Sdf
+
+            prim = cam.GetPrim()
+            prim.AddAppliedSchema("OmniRtxCameraAutoExposureAPI_1")
+            prim.CreateAttribute("omni:rtx:autoExposure:enabled", Sdf.ValueTypeNames.Bool).Set(True)
         self.render_product = rep.create.render_product(str(cam.GetPath()),
                                                         resolution=(self.width, self.height))
         self.annotator = rep.AnnotatorRegistry.get_annotator("rgb")

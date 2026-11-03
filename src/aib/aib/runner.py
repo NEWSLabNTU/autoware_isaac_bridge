@@ -212,6 +212,11 @@ def main(argv=None):
                 lag = wall0 + sim_time - time.monotonic()
                 if lag > 0:
                     time.sleep(lag)
+    except BaseException:
+        # logged here: app.close() below ends the process before Python would print it
+        # (a camera's CameraInfo assertion once stopped the runner after one frame, silently)
+        log.exception("the loop raised at frame %d, sim time %.2f s", frame, sim_time)
+        raise
     finally:
         log.info("stopping after %d frame(s), sim time %.2f s", frame, sim_time)
         ego.close()
