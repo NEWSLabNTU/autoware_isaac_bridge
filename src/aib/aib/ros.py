@@ -14,6 +14,8 @@ episode, and the Autoware profile's `clock_guard` ends the stack if it ever goes
 | the rig's camera topics (when enabled) | Image, CameraInfo | the sensor's |
 | `/vehicle/status/{velocity,steering,gear,control_mode,turn_indicators,hazard_lights}_status` | Autoware | `base_link` |
 | `/clock` | Clock | |
+| `ground_truth.topic` (the ego config's, when on; swb roadmap 063) | Odometry, base_link in the map | `map` -> `base_link` |
+| NDT's pose topic (with `ground_truth.pose_estimate`) | PoseWithCovarianceStamped, the same pose | `map` |
 | `/perception/traffic_light_recognition/external/traffic_signals` (when the host has signals) | TrafficLightGroupArray | |
 
 Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_cmd}` (the
@@ -58,7 +60,7 @@ DEFAULT_TOPICS = {
 
 class EgoRos:
     def __init__(self, domain=1, rig=None, node_name="isaac_vehicle",
-                 control_topic="/control/command/control_cmd", lockstep=None):
+                 control_topic="/control/command/control_cmd", lockstep=None, ground_truth=None):
         import rclpy
         from autoware_control_msgs.msg import Control
         from autoware_vehicle_msgs.msg import (ControlModeReport, GearCommand, GearReport,
@@ -155,12 +157,30 @@ class EgoRos:
             log.info("lockstep: each frame waits up to %.2f s for a pose on %s",
                      self.lockstep["timeout_s"], self.lockstep["topic"])
         self._reset_lockstep()
+        self.ground_truth = dict(ground_truth or {})
+        if self.ground_truth:
+            from geometry_msgs.msg import PoseWithCovarianceStamped
+            from nav_msgs.msg import Odometry
+
+            from .rig import POSE_ESTIMATE_TOPIC
+            from .sensing import pose_covariance
+
+            self.m.update(Odometry=Odometry, PoseWithCovarianceStamped=PoseWithCovarianceStamped)
+            self.pub["gt"] = n.create_publisher(Odometry, self.ground_truth["topic"], reliable)
+            self._gt_cov = pose_covariance(self.ground_truth["covariance"])
+            if self.ground_truth["pose_estimate"]:
+                self.pub["gt_pose"] = n.create_publisher(PoseWithCovarianceStamped,
+                                                         POSE_ESTIMATE_TOPIC, reliable)
+            log.info("ground truth on %s%s", self.ground_truth["topic"],
+                     f", and as the pose estimate on {POSE_ESTIMATE_TOPIC}"
+                     if self.ground_truth["pose_estimate"] else "")
         log.info("ego ROS 2 side on domain %d", domain)
 
     @classmethod
     def from_config(cls, cfg, rig=None):
         return cls(domain=cfg.domain, rig=rig, node_name=cfg.node_name,
-                   control_topic=cfg.control_topic, lockstep=cfg.lockstep)
+                   control_topic=cfg.control_topic, lockstep=cfg.lockstep,
+                   ground_truth=cfg.ground_truth)
 
     def sensor_publisher(self, s):
         """The publisher(s) for a SensorRig, made on first use: (main, info or None)."""
@@ -292,6 +312,30 @@ class EgoRos:
         hz.stamp = stamp
         hz.report = self.hazard
         pub["hazard"].publish(hz)
+
+    def publish_ground_truth(self, gt, stamp):
+        """base_link's ground truth (aib.sensing.ground_truth) for one frame, when on."""
+        if not self.ground_truth:
+            return
+        (px, py, pz), (qw, qx, qy, qz), v, w = gt
+        o = self.m["Odometry"]()
+        o.header.stamp = stamp
+        o.header.frame_id = "map"
+        o.child_frame_id = "base_link"
+        pose = o.pose.pose
+        pose.position.x, pose.position.y, pose.position.z = px, py, pz
+        pose.orientation.w, pose.orientation.x = qw, qx
+        pose.orientation.y, pose.orientation.z = qy, qz
+        o.pose.covariance = self._gt_cov
+        tw = o.twist.twist
+        tw.linear.x, tw.linear.y, tw.linear.z = v
+        tw.angular.x, tw.angular.y, tw.angular.z = w
+        self.pub["gt"].publish(o)
+        if "gt_pose" in self.pub:
+            p = self.m["PoseWithCovarianceStamped"]()
+            p.header = o.header
+            p.pose = o.pose
+            self.pub["gt_pose"].publish(p)
 
     def publish_signals(self, groups, stamp):
         """Autoware's V2X traffic signals (`aib.signals`): `groups`, `[(regulatory element id,

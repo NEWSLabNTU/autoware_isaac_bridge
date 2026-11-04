@@ -111,6 +111,39 @@ class RigTest(unittest.TestCase):
                 EgoConfig.load(p)
 
 
+class GroundTruthConfigTest(unittest.TestCase):
+    """The ego config's ground_truth (swb roadmap 063 e): off by default, defaults filled."""
+
+    def load(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "e.yaml"
+            p.write_text(f"rig: {RIG}\n" + text)
+            return EgoConfig.load(p)
+
+    def test_off_by_default(self):
+        self.assertEqual(EgoConfig.load(EGO).ground_truth, {})
+
+    def test_on_fills_the_defaults(self):
+        gt = self.load("ground_truth: {pose_estimate: true}\n").ground_truth
+        self.assertEqual(gt["topic"], "/ground_truth/odom")
+        self.assertTrue(gt["pose_estimate"])
+        self.assertEqual(gt["covariance"], [0.01, 0.0003])
+        gt = self.load("ground_truth: {topic: /gt}\n").ground_truth
+        self.assertEqual(gt["topic"], "/gt")
+        self.assertFalse(gt["pose_estimate"])
+
+    def test_unknown_keys_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "ground_truth: unknown"):
+            self.load("ground_truth: {frame: map}\n")
+
+    def test_a_pose_estimate_and_a_lockstep_on_the_same_topic_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "would wait on itself"):
+            self.load("ground_truth: {pose_estimate: true}\nlockstep: {timeout_s: 1.0}\n")
+        # a lockstep on another topic is fine
+        cfg = self.load("ground_truth: {pose_estimate: true}\nlockstep: {topic: /x}\n")
+        self.assertTrue(cfg.ground_truth["pose_estimate"])
+
+
 class SensorKitLaunchTest(unittest.TestCase):
     """Autoware's sensing launch consumes the topics the rig publishes."""
 

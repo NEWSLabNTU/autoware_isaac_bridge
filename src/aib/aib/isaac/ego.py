@@ -18,6 +18,7 @@ Lockstep, as acb follows CARLA's ticks: the commands that arrived before a frame
 import logging
 
 from ..control import State
+from ..sensing import ground_truth
 from . import sensors as sensor_kinds
 from .vehicle import Vehicle
 
@@ -42,6 +43,7 @@ class Ego:
                                box_center or rig.box_center, box_dims or rig.box_dims, pose,
                                ground_clearance=rig.ground_clearance)
         self.state = State()
+        self.map_origin = projector.origin if projector is not None else (0.0, 0.0, 0.0)
         self.sensors = [sensor_kinds.make(s, ros, stage, path)
                         for s in rig.sensors.values() if s.enabled]
         for s in self.sensors:
@@ -88,6 +90,8 @@ class Ego:
     def publish(self, sim_time, stamp):
         """Everything Autoware gets for this frame but `/clock` (the host's), at `stamp`."""
         self.ros.publish_status(self.state, stamp)
+        if self.ros.ground_truth:
+            self.ros.publish_ground_truth(ground_truth(self.state, self.map_origin), stamp)
         for s in self.sensors:
             s.publish(self.state, sim_time, stamp)
 

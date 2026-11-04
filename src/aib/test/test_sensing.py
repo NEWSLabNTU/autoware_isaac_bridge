@@ -7,8 +7,8 @@ import numpy as np
 _paths = __import__("_paths")  # sys.path, for direct runs
 from aib import frames
 from aib.control import State
-from aib.sensing import (POINT_STEP, USD_CAMERA_IN_LINK, Periodic, gnss_reading, imu_reading,
-                         pack_cloud)
+from aib.sensing import (POINT_STEP, USD_CAMERA_IN_LINK, Periodic, gnss_reading,
+                         ground_truth, imu_reading, pack_cloud, pose_covariance)
 
 
 def close(a, b, tol=1e-9):
@@ -137,6 +137,30 @@ class MiscTest(unittest.TestCase):
         self.assertEqual(fired, [0.0, 0.1, 0.2])
         self.assertTrue(all(Periodic(0).due(t) for t in (0.0, 0.0, 0.01)))
 
+
+
+
+class GroundTruthTest(unittest.TestCase):
+    """base_link in the map frame for the recordings and the drive on ground truth (swb 063 e)."""
+
+    def test_the_map_is_the_world_plus_its_origin(self):
+        st = State()
+        st.position = (10.0, -5.0, 0.3)
+        st.quat = frames.rpy_quat(0.0, 0.0, 1.0)
+        st.velocity = (20.0, 0.1, 0.0)
+        st.angular_velocity = (0.0, 0.0, 0.2)
+        p, q, v, w = ground_truth(st, (100.0, 200.0, 1.0))
+        self.assertTrue(close(p, (110.0, 195.0, 1.3)))
+        self.assertTrue(close(q, st.quat))
+        self.assertTrue(close(v, (20.0, 0.1, 0.0)))  # body frame, as the velocity report
+        self.assertTrue(close(w, (0.0, 0.0, 0.2)))
+        self.assertTrue(close(ground_truth(st)[0], st.position))  # no origin: the world
+
+    def test_the_covariance_is_diagonal(self):
+        c = pose_covariance((0.01, 0.0003))
+        self.assertEqual(len(c), 36)
+        self.assertEqual([c[i * 7] for i in range(6)], [0.01] * 3 + [0.0003] * 3)
+        self.assertAlmostEqual(sum(c), 0.0309)
 
 if __name__ == "__main__":
     unittest.main()

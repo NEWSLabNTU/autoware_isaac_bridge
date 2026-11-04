@@ -37,6 +37,24 @@ def gnss_reading(state, t_base_gnss, projector=None):
     return lat, lon, float(p[2])
 
 
+def ground_truth(state, map_origin=(0.0, 0.0, 0.0)):
+    """base_link's ground truth for one frame: (position in the map, orientation wxyz, body
+    velocity, body angular velocity). The map is the world plus `map_origin`, as the GNSS is
+    projected (aib.frames.Projector); the velocities are base_link's, as the velocity report."""
+    p = tuple(float(a) + float(o) for a, o in zip(state.position, map_origin))
+    return (p, tuple(float(c) for c in state.quat), tuple(float(c) for c in state.velocity),
+            tuple(float(c) for c in state.angular_velocity))
+
+
+def pose_covariance(variances):
+    """A 6x6 row-major covariance, diagonal: (position variance, m^2; angle variance, rad^2)."""
+    vp, va = (float(v) for v in variances)
+    c = [0.0] * 36
+    for i, v in enumerate((vp, vp, vp, va, va, va)):
+        c[i * 7] = v
+    return c
+
+
 def pack_cloud(xyz, intensity=None, elevation=None, channels=128):
     """Points (N x 3, sensor frame) to PointCloud2 bytes in CLOUD_FIELDS' layout. Intensity
     in [0, 1] becomes 0-255; the channel is the elevation's rank among `channels` rings."""

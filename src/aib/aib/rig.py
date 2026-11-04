@@ -123,6 +123,12 @@ def spec_doc(rig_path, spec, spec_hash):
     return loaded.doc
 
 
+# NDT's pose, which Autoware's EKF takes (and the lockstep waits for by default)
+POSE_ESTIMATE_TOPIC = "/localization/pose_estimator/pose_with_covariance"
+GROUND_TRUTH_DEFAULTS = {"topic": "/ground_truth/odom", "pose_estimate": False,
+                         "covariance": [0.01, 0.0003]}
+
+
 @dataclass
 class EgoConfig:
     """A run of a rig: what swb's `acb_ego.yaml` held, minus the vehicle itself."""
@@ -140,6 +146,11 @@ class EgoConfig:
     # {} off; {topic, timeout_s, max_misses} on, each defaulting to aib.ros.LOCKSTEP_DEFAULTS
     # (Autoware's NDT pose, 1 s, 3).
     lockstep: dict = field(default_factory=dict)
+    # base_link's ground truth every frame (swb roadmap 063 e): {} off; on, each key defaulting
+    # to GROUND_TRUTH_DEFAULTS: Odometry in the map frame on `topic`, and with `pose_estimate`
+    # the same pose as NDT's PoseWithCovarianceStamped (POSE_ESTIMATE_TOPIC, `covariance`:
+    # position m^2, angle rad^2), so Autoware under the profile's ndt:=none drives on it.
+    ground_truth: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path):
@@ -159,6 +170,16 @@ class EgoConfig:
             raise ValueError(f"{path}: no rig")
         if not Path(cfg.rig).is_absolute():
             cfg.rig = str((path.parent / cfg.rig).resolve())
+        if cfg.ground_truth:
+            unknown = set(cfg.ground_truth) - set(GROUND_TRUTH_DEFAULTS)
+            if unknown:
+                raise ValueError(f"{path}: ground_truth: unknown key(s) {sorted(unknown)}")
+            cfg.ground_truth = {**GROUND_TRUTH_DEFAULTS, **cfg.ground_truth}
+            locked = cfg.lockstep and cfg.lockstep.get("topic", POSE_ESTIMATE_TOPIC)
+            if cfg.ground_truth["pose_estimate"] and locked == POSE_ESTIMATE_TOPIC:
+                raise ValueError(f"{path}: ground_truth.pose_estimate publishes on "
+                                 f"{POSE_ESTIMATE_TOPIC}, which the lockstep waits for: it would "
+                                 "wait on itself; drop the lockstep or point it elsewhere")
         return cfg
 
     def load_rig(self):
