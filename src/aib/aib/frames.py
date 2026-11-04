@@ -135,8 +135,9 @@ class Projector:
 
     @classmethod
     def from_map(cls, map_dir, map_origin=(0.0, 0.0, 0.0)):
-        """The map dir's projector: MGRS, or none (TransverseMercator at (0, 0)). Another
-        projector type is refused rather than published wrong."""
+        """The map dir's projector: MGRS, or none or TransverseMercator at (0, 0) (CARLA's
+        towns). Another projector, or TransverseMercator about another origin, is refused
+        rather than published wrong."""
         import os
 
         import yaml
@@ -150,6 +151,13 @@ class Projector:
         if kind == "MGRS":
             return cls(map_origin, info["mgrs_grid"])
         if kind in ("", "Local"):
+            return cls(map_origin)
+        if kind == "TransverseMercator":
+            # what download_maps.sh writes for CARLA's towns: the same frame as no file
+            o = info.get("map_origin") or {}
+            if float(o.get("latitude", 0.0)) or float(o.get("longitude", 0.0)):
+                raise ValueError(f"{path}: TransverseMercator is supported only at latitude 0, "
+                                 f"longitude 0 (CARLA's towns), not {o}")
             return cls(map_origin)
         raise ValueError(f"{path}: projector_type {kind} is not supported (MGRS or none)")
 

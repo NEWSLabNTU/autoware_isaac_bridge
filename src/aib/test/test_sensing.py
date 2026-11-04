@@ -99,6 +99,23 @@ class GnssTest(unittest.TestCase):
         p = frames.Projector.from_map("/nonexistent")
         self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
 
+    def test_transverse_mercator_at_zero_is_the_old_frame(self):
+        # what download_maps.sh writes for CARLA's towns (swb 063: aib refused it, so no
+        # Isaac run on such a map started)
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "map_projector_info.yaml")
+            with open(f, "w") as fh:
+                fh.write("projector_type: TransverseMercator\nvertical_datum: WGS84\n"
+                         "map_origin: {latitude: 0.0, longitude: 0.0, altitude: 0.0}\n")
+            p = frames.Projector.from_map(d)
+            self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
+            with open(f, "w") as fh:
+                fh.write("projector_type: TransverseMercator\n"
+                         "map_origin: {latitude: 25.0, longitude: 121.5}\n")
+            with self.assertRaisesRegex(ValueError, "only at latitude 0, longitude 0"):
+                frames.Projector.from_map(d)
+
 
 class CloudTest(unittest.TestCase):
     def test_layout(self):
