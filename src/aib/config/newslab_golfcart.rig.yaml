@@ -1,4 +1,4 @@
-# Generated from sim_vehicle_spec/vehicles/newslab_golfcart.yaml (spec_hash f84c24a1a99428690c67c726009163032e0e474e4ba73e7ffde48aed0461b417) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/newslab_golfcart.yaml (spec_hash fe75c5d5295c767e13092b9863afaba45b9317fe082af87023c1a94e2295ae06) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/newslab_golfcart.yaml
@@ -7,7 +7,7 @@ description: NEWSLab golf cart with cargo box and sensor deck (geometry and sens
   drive estimated)
 assumptions: [body.ground_clearance, brakes, inertia.com_front_fraction, inertia.com_height, inertia.inertia_box,
   inertia.mass, powertrain, resistance, suspension, tires, wheels.mass]
-spec_hash: f84c24a1a99428690c67c726009163032e0e474e4ba73e7ffde48aed0461b417
+spec_hash: fe75c5d5295c767e13092b9863afaba45b9317fe082af87023c1a94e2295ae06
 body:
   catalogue_model: vehicle.newslab.golfcart
   box_center: [0.823, 0.0, 1.0025]
