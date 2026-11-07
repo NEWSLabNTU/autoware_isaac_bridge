@@ -1,7 +1,8 @@
 """aib's standalone runner: one ego in an Isaac world, no swb, no SSv2.
 
     python -m aib.runner --ego config/ego.yaml [--world <usd> | <world.yaml>] [--pose x,y,z,yaw]
-        [--frame-rate 20] [--physics-dt 0.016667] [--display :8] [--realtime] [--duration s]
+        [--frame-rate 20] [--physics-dt 0.016667] [--display :8 [--view chase|free]]
+        [--realtime] [--duration s]
         [--signals <map dir> [--green-s 10] [--amber-s 3]]
 
 Run it through `just isaac-ego` (Isaac's environment: scripts/isaac_env.sh). It starts Isaac
@@ -35,6 +36,38 @@ import os
 import signal
 import sys
 import time
+
+
+# The window's chase view, as swb's recorder's "road" view (swb_isaac_world.recorder): 7 m
+# behind base_link, 3.4 m up, pitched 15 deg down, 80 deg across.
+CHASE = {"offset": (-7.0, 0.0, 3.4), "pitch_deg": 15.0, "hfov_deg": 80.0}
+
+
+def chase_view(stage, vehicle_path):
+    """A camera under the vehicle (so it follows it) made the window's viewport camera: what
+    a demo audience watches. The editor's own cameras stay one click away (Perspective)."""
+    import math
+
+    from pxr import Gf, UsdGeom
+
+    from .frames import qmul, rpy_quat
+    from .sensing import APERTURE_MM, USD_CAMERA_IN_LINK
+
+    path = f"{vehicle_path}/chase_view"
+    x = UsdGeom.Xform.Define(stage, path)
+    x.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*CHASE["offset"]))
+    q = qmul(rpy_quat(0.0, math.radians(CHASE["pitch_deg"]), 0.0), USD_CAMERA_IN_LINK)
+    cam = UsdGeom.Camera.Define(stage, f"{path}/camera")
+    cam.AddOrientOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(*q))
+    cam.CreateHorizontalApertureAttr(APERTURE_MM)
+    cam.CreateFocalLengthAttr(APERTURE_MM / (2 * math.tan(math.radians(CHASE["hfov_deg"]) / 2)))
+    cam.CreateClippingRangeAttr(Gf.Vec2f(0.1, 2000.0))
+    try:
+        from omni.kit.viewport.utility import get_active_viewport
+
+        get_active_viewport().camera_path = str(cam.GetPath())
+    except Exception:  # noqa: BLE001 -- a window without a viewport keeps its own camera
+        logging.getLogger("aib").exception("chase view: no active viewport")
 
 
 def parse_pose(text):
@@ -97,6 +130,9 @@ def main(argv=None):
     ap.add_argument("--frame-rate", type=float, default=20.0, help="frames per second (Hz)")
     ap.add_argument("--physics-dt", type=float, default=1 / 60, help="physics step (s)")
     ap.add_argument("--display", default="", help="X display for a window; empty: headless")
+    ap.add_argument("--view", default="chase", choices=("chase", "free"),
+                    help="with a window: the viewport follows the ego from behind (chase), or "
+                         "stays the editor's own camera (free)")
     ap.add_argument("--realtime", action="store_true", help="pace frames to the wall clock")
     ap.add_argument("--duration", type=float, default=0.0, help="stop after this much sim time")
     ap.add_argument("--signals", default="",
@@ -183,6 +219,8 @@ def main(argv=None):
         world.step(render=True)
         ego.after_substep(physx, dt)
 
+    if args.display and args.view == "chase":
+        chase_view(stage, "/World/ego")
     frames = ego.warm_up(warm_step)
     log.info("ego %s (%s) at %s; sensors warm after %d frame(s); %d substep(s) of %.4f s "
              "per frame", rig.name, rig.path, args.pose[0], frames, substeps, dt)

@@ -100,6 +100,7 @@ isaac-ego *args:
             ego:=*) ego="${a#ego:=}" ;;
             world:=*) world="${a#world:=}" ;;
             pose:=*) pose="${a#pose:=}" ;;
+            view:=?*) extra+=(--view "${a#view:=}") ;;
             realtime:=true) extra+=(--realtime) ;;
             realtime:=*) ;;
             duration:=*) extra+=(--duration "${a#duration:=}") ;;
