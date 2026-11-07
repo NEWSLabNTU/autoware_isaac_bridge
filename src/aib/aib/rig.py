@@ -151,6 +151,9 @@ class EgoConfig:
     # the same pose as NDT's PoseWithCovarianceStamped (POSE_ESTIMATE_TOPIC, `covariance`:
     # position m^2, angle rad^2), so Autoware under the profile's ndt:=none drives on it.
     ground_truth: dict = field(default_factory=dict)
+    # A body on the stand-alone runner's ego (aib.isaac.body): a vehicle catalogue entry
+    # (a car's entry.json), relative to this file; empty: the box and cylinders show.
+    body: str = ""
 
     @classmethod
     def load(cls, path):
@@ -168,8 +171,16 @@ class EgoConfig:
         cfg = cls(**doc)
         if not cfg.rig:
             raise ValueError(f"{path}: no rig")
+        import os
+
+        # Environment variables expand, so a config kept in another repository can name aib's
+        # rigs and its own assets (the golf cart's: ${AIB_CONFIG}/newslab_golfcart.rig.yaml).
+        cfg.rig = os.path.expandvars(cfg.rig)
         if not Path(cfg.rig).is_absolute():
             cfg.rig = str((path.parent / cfg.rig).resolve())
+        if cfg.body:
+            body = os.path.expandvars(cfg.body)
+            cfg.body = body if Path(body).is_absolute() else str((path.parent / body).resolve())
         if cfg.ground_truth:
             unknown = set(cfg.ground_truth) - set(GROUND_TRUTH_DEFAULTS)
             if unknown:

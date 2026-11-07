@@ -173,6 +173,10 @@ def main(argv=None):
     from pxr import UsdGeom
 
     UsdGeom.Imageable(stage.GetPrimAtPath(ego.vehicle.body_path)).MakeInvisible()
+    if cfg.body:
+        from .isaac.body import dress, load_entry
+
+        dress(stage, "/World/ego", load_entry(cfg.body))
 
     def warm_step():
         ego.before_substep(dt)
