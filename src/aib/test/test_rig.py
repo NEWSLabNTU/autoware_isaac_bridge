@@ -72,7 +72,7 @@ class RigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "r.yaml"
             p.write_text(RIG.read_text().replace("spec_hash: ", "spec_hash: 0", 1))
-            with self.assertRaisesRegex(ValueError, "just generate"):
+            with self.assertRaisesRegex(ValueError, "regenerate the rig"):
                 Rig.load(p)
 
     def test_the_shipped_ego_config(self):
@@ -109,6 +109,73 @@ class RigTest(unittest.TestCase):
             p.write_text("rig: x.yaml\nlidar: {}\n")
             with self.assertRaises(ValueError):
                 EgoConfig.load(p)
+
+
+class OutsideVehicleTest(unittest.TestCase):
+    """A vehicle kept in another repository: its spec, rig, ego config, body and lidar
+    profiles side by side, each naming the next relative to itself; the domain from
+    ROS_DOMAIN_ID when the ego config names none."""
+
+    def setUp(self):
+        import os
+        import shutil
+
+        from aib import gen
+
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        spec = REPO / "deps/sim_vehicle_spec/vehicles/tesla_model3.yaml"
+        shutil.copy(spec, d / "car.yaml")
+        (d / "isaac").mkdir()
+        self.rig = d / "isaac/car.rig.yaml"
+        self.assertEqual(gen.main(["--spec", str(d / "car.yaml"), "-o", str(self.rig)]), 0)
+        self.assertEqual(gen.main(["--spec", str(d / "car.yaml"), "-o", str(self.rig),
+                                   "--check"]), 0)
+        self.d = d
+        self.env = os.environ.get("ROS_DOMAIN_ID")
+
+    def tearDown(self):
+        import os
+
+        if self.env is None:
+            os.environ.pop("ROS_DOMAIN_ID", None)
+        else:
+            os.environ["ROS_DOMAIN_ID"] = self.env
+        self.tmp.cleanup()
+
+    def test_the_rig_names_its_spec_beside_it(self):
+        self.assertIn("spec: ../car.yaml", self.rig.read_text())
+        r = Rig.load(self.rig)
+        self.assertEqual(r.name, "tesla_model3")
+        self.assertEqual(r.ecu.motor_peak_power, 194000.0)
+
+    def test_a_changed_spec_makes_the_rig_stale(self):
+        from aib import gen
+
+        spec = self.d / "car.yaml"
+        spec.write_text(spec.read_text().replace("mass: 1760", "mass: 1761", 1))
+        with self.assertRaisesRegex(ValueError, "regenerate the rig"):
+            Rig.load(self.rig)
+        self.assertEqual(gen.main(["--spec", str(spec), "-o", str(self.rig), "--check"]), 1)
+
+    def test_ego_paths_and_domain(self):
+        import os
+
+        (self.d / "isaac/lidars").mkdir()
+        text = self.rig.read_text()
+        self.rig.write_text(re.sub(r"(\n    isaac: \{)", r"\1usd: lidars/x.usda, ", text, count=1))
+        ego = self.d / "isaac/ego.yaml"
+        ego.write_text("rig: car.rig.yaml\nbody: body/entry.json\n")
+        os.environ["ROS_DOMAIN_ID"] = "17"
+        cfg = EgoConfig.load(ego)
+        self.assertEqual(cfg.domain, 17)
+        self.assertEqual(Path(cfg.body), (self.d / "isaac/body/entry.json").resolve())
+        usds = [s.isaac.get("usd") for s in cfg.load_rig().sensors.values() if s.isaac.get("usd")]
+        self.assertEqual(usds, [str((self.d / "isaac/lidars/x.usda").resolve())])
+        os.environ.pop("ROS_DOMAIN_ID")
+        self.assertEqual(EgoConfig.load(ego).domain, 0)
+        ego.write_text("rig: car.rig.yaml\ndomain: 3\n")
+        self.assertEqual(EgoConfig.load(ego).domain, 3)
 
 
 class GroundTruthConfigTest(unittest.TestCase):

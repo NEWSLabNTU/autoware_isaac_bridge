@@ -3,10 +3,14 @@ names it. Pure.
 
 A rig (`config/<vehicle>.rig.yaml`, written by `aib.gen` from a vehicle spec) is the vehicle:
 its flat physics (`VehicleParams`), its chassis box, its sensors in base_link. Loading it also
-loads the spec it names (under `deps/`) for the car's onboard computers' calibration
+loads the spec it names (relative to the rig, else under `deps/`; or absolute) for the car's onboard computers' calibration
 (`sim_vehicle_ecu.Calibration`), and refuses a spec whose `spec_hash` is not the rig's. An ego
 config (`config/ego.yaml`) is a run of it: which rig, the ROS domain, and hand overrides of
 the PhysX vehicle, the calibration and the sensors, applied last.
+
+A vehicle may live outside swb: an ego config, its rig, the rig's spec, its body and its
+sensors' USD profiles name each other by paths relative to the file that names them, so a
+user's repository keeps them side by side (docs/vehicle-from-another-repository.md).
 """
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -87,7 +91,9 @@ class Rig:
 
                 s["k"] = specmod.camera_intrinsics(s["width"], s["height"], s["horizontal_fov"])
             t, q = tuple(s.pop("translation")), tuple(s.pop("quat"))
-            isaac = s.pop("isaac", {}) or {}
+            isaac = dict(s.pop("isaac", {}) or {})
+            if isaac.get("usd"):
+                isaac["usd"] = _resolve(path.parent, isaac["usd"])
             sensors[name] = SensorRig(name=name, translation=t, quat=q, extra=s, isaac=isaac,
                                       **core)
         body = doc.get("body") or {}
@@ -108,18 +114,35 @@ class Rig:
                 if s.type == kind and (s.enabled or not enabled_only)]
 
 
+def _resolve(base, p):
+    """A path a file names: environment variables expanded; relative to `base` (the naming
+    file's directory) unless absolute."""
+    import os
+
+    p = os.path.expandvars(str(p))
+    return p if Path(p).is_absolute() else str((Path(base) / p).resolve())
+
+
+def spec_path(rig_path, spec):
+    """The file of the spec a rig names: absolute; relative to the rig (a vehicle kept in
+    another repository, `aib.gen --spec`); else relative to `deps/` (swb's own specs)."""
+    p = Path(_resolve(Path(rig_path).parent, spec))
+    return p if p.is_file() else DEPS / spec
+
+
 def spec_doc(rig_path, spec, spec_hash):
-    """The document of the spec a rig names (`spec:`, relative to `deps/`), refused when its
-    spec_hash is not the rig's: the rig would be stale (`just generate`)."""
+    """The document of the spec a rig names (`spec_path`), refused when its spec_hash is not
+    the rig's: the rig would be stale (`aib.gen`)."""
     from sim_vehicle_spec import spec as specmod
 
     if not spec:
-        raise ValueError(f"{rig_path}: no spec (regenerate the rig: just generate)")
-    loaded = specmod.load(DEPS / spec)
+        raise ValueError(f"{rig_path}: no spec (regenerate the rig: aib.gen)")
+    path = spec_path(rig_path, spec)
+    loaded = specmod.load(path)
     have = specmod.spec_hash(loaded)
     if spec_hash and have != spec_hash:
         raise ValueError(f"{rig_path}: generated from spec_hash {spec_hash[:12]}, but "
-                         f"{DEPS / spec} is {have[:12]}: run just generate")
+                         f"{path} is {have[:12]}: regenerate the rig (aib.gen)")
     return loaded.doc
 
 
@@ -134,7 +157,8 @@ class EgoConfig:
     """A run of a rig: what swb's `acb_ego.yaml` held, minus the vehicle itself."""
 
     rig: str = ""  # path, relative to this file
-    domain: int = 1
+    # ROS domain of the ego's nodes; None (the key left out): ROS_DOMAIN_ID, else 0
+    domain: int | None = None
     node_name: str = "isaac_vehicle"
     vehicle: dict = field(default_factory=dict)  # VehicleParams overrides, by field name
     ecu: dict = field(default_factory=dict)  # sim_vehicle_ecu.Calibration overrides, by name
@@ -173,14 +197,13 @@ class EgoConfig:
             raise ValueError(f"{path}: no rig")
         import os
 
-        # Environment variables expand, so a config kept in another repository can name aib's
-        # rigs and its own assets (the golf cart's: ${AIB_CONFIG}/newslab_golfcart.rig.yaml).
-        cfg.rig = os.path.expandvars(cfg.rig)
-        if not Path(cfg.rig).is_absolute():
-            cfg.rig = str((path.parent / cfg.rig).resolve())
+        # Paths are relative to this file (environment variables expand), so a config kept in
+        # another repository names its own rig and body beside it.
+        cfg.rig = _resolve(path.parent, cfg.rig)
         if cfg.body:
-            body = os.path.expandvars(cfg.body)
-            cfg.body = body if Path(body).is_absolute() else str((path.parent / body).resolve())
+            cfg.body = _resolve(path.parent, cfg.body)
+        if cfg.domain is None:
+            cfg.domain = int(os.environ.get("ROS_DOMAIN_ID") or 0)
         if cfg.ground_truth:
             unknown = set(cfg.ground_truth) - set(GROUND_TRUTH_DEFAULTS)
             if unknown:

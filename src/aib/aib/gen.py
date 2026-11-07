@@ -3,6 +3,10 @@ sensors from (aib.rig).
 
     python -m aib.gen [--specs deps/sim_vehicle_spec/vehicles] [--root .]           # write
     python -m aib.gen ... --check   # exit 1 when a rig is stale
+    python -m aib.gen --spec <car.yaml> -o <car.rig.yaml> [--check]   # any spec, anywhere
+
+The last form is for a vehicle kept outside swb (a user's repository): the rig names its spec
+by a path relative to the rig, which aib.rig resolves the same way.
 
 The spec is sim_vehicle_spec's (deps/sim_vehicle_spec, a submodule): one per car, the same one
 Autoware's packages (autoware_sim_vehicle), CARLA's files and the SSv2 catalog come from. This
@@ -117,6 +121,16 @@ def outputs(specs=SPECS, root=REPO):
     return out
 
 
+def single(spec_path, rig_path):
+    """{rig_path: content} for one spec, the rig naming it relative to the rig's directory."""
+    import os
+
+    spec_path, rig_path = Path(spec_path).resolve(), Path(rig_path).resolve()
+    spec = specmod.load(spec_path)
+    rel = os.path.relpath(spec_path, rig_path.parent)
+    return {str(rig_path): rig(spec, emit.header(spec, TOOL, rel), rel)}
+
+
 def stale(specs=SPECS, root=REPO):
     return emit.stale(outputs(specs, root), root)
 
@@ -129,9 +143,25 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="the Isaac rig from a vehicle spec")
     ap.add_argument("--specs", type=Path, default=SPECS)
     ap.add_argument("--root", type=Path, default=REPO)
+    ap.add_argument("--spec", type=Path, help="one spec, anywhere (with -o)")
+    ap.add_argument("-o", "--output", type=Path, help="the rig to write for --spec")
     ap.add_argument("--check", action="store_true",
                     help="write nothing; exit 1 listing the rigs that are stale")
     args = ap.parse_args(argv)
+    if (args.spec is None) != (args.output is None):
+        ap.error("--spec and -o go together")
+    if args.spec is not None:
+        out = single(args.spec, args.output)
+        if args.check:
+            bad = emit.stale(out, "/")
+            for p in bad:
+                print(f"stale: {p}; run python -m aib.gen --spec {args.spec} -o {args.output}",
+                      file=sys.stderr)
+            print("rig: " + ("STALE" if bad else "up to date"))
+            return 1 if bad else 0
+        for p in emit.write(out, "/"):
+            print(f"wrote {p}")
+        return 0
     if args.check:
         bad = stale(args.specs, args.root)
         for p in bad:
