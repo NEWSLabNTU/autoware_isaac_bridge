@@ -175,7 +175,7 @@ class EgoConfig:
     # the same pose as NDT's PoseWithCovarianceStamped (POSE_ESTIMATE_TOPIC, `covariance`:
     # position m^2, angle rad^2), so Autoware under the profile's ndt:=none drives on it.
     ground_truth: dict = field(default_factory=dict)
-    # A body on the stand-alone runner's ego (aib.isaac.body): a vehicle catalogue entry
+    # The ego's body (aib.isaac.body; swb's Isaac world server too): a vehicle catalogue entry
     # (a car's entry.json), relative to this file; empty: the box and cylinders show.
     body: str = ""
 
