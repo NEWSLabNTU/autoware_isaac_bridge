@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!--
+  One ego in an Isaac Sim world, stand-alone (aib's runner; no swb, no SSv2): the world, the
+  vehicle and its sensors, its vehicle interface and /clock on the ego config's ROS domain.
+  Autoware on that domain drives it (isaac_simulator.launch.xml, or a vehicle's own stack).
+
+    play_launch launch aib_launch isaac_vehicle.launch.xml ego:=<ego.yaml> \
+        world:=<map>/isaac/world.yaml map_pose:=x,y,z,yaw render:=window
+
+  Environment: ISAAC_ROOT (Isaac Sim 6.1), DISPLAY for render:=window, ISAAC_KIT_ARGS
+  (e.g. the GPU), RMW_IMPLEMENTATION and CYCLONEDDS_URI as Autoware's.
+-->
+<launch>
+  <arg name="ego" description="aib ego config (EgoConfig YAML: rig, domain, body, ...)"/>
+  <arg name="world" default="" description="a map's isaac/world.yaml, or a USD; empty: a ground plane"/>
+  <arg name="map_pose" default="" description="x,y,z,yaw of base_link in the map frame (m, rad)"/>
+  <arg name="pose" default="" description="or x,y,z,yaw in the world frame"/>
+  <arg name="render" default="auto" description="auto (a window when DISPLAY is set), window or headless"/>
+  <arg name="view" default="chase" description="with a window: chase (the viewport follows the ego) or free"/>
+  <arg name="realtime" default="true" description="pace the world to the wall clock"/>
+
+  <node pkg="aib" exec="aib_isaac_vehicle" name="isaac_vehicle_runner" output="screen"
+        args="--ego=$(var ego) --world=$(var world) --map-pose=$(var map_pose) --pose=$(var pose)
+              --render=$(var render) --view=$(var view) --realtime=$(var realtime)"/>
+</launch>

@@ -1,6 +1,7 @@
 """aib's standalone runner: one ego in an Isaac world, no swb, no SSv2.
 
-    python -m aib.runner --ego config/ego.yaml [--world <usd> | <world.yaml>] [--pose x,y,z,yaw]
+    python -m aib.runner --ego config/ego.yaml [--world <usd> | <world.yaml>]
+        [--pose x,y,z,yaw | --map-pose x,y,z,yaw]
         [--frame-rate 20] [--physics-dt 0.016667] [--display :8 [--view chase|free]]
         [--realtime] [--duration s]
         [--signals <map dir> [--green-s 10] [--amber-s 3]]
@@ -120,6 +121,19 @@ def world_files(world):
     return usd, Projector.from_map(map_dir, origin)
 
 
+def world_pose(map_pose, world):
+    """A map-frame pose in the world: a world.yaml's map_origin taken off (z by a 5 cm drop, as
+    a spawn); with no world.yaml the frames are the same."""
+    (x, y, z), q = map_pose
+    origin = (0.0, 0.0, 0.0)
+    if world and world.endswith((".yaml", ".yml")):
+        import yaml
+
+        with open(world) as f:
+            origin = tuple((yaml.safe_load(f) or {}).get("map_origin") or origin)
+    return (x - origin[0], y - origin[1], z - origin[2] + 0.05), q
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--ego", required=True, help="ego config YAML (config/ego.yaml)")
@@ -127,6 +141,9 @@ def main(argv=None):
                     help="USD stage, or a map's isaac/world.yaml, to drive in; empty: a ground plane")
     ap.add_argument("--pose", type=parse_pose, default=parse_pose("0,0,0.05,0"),
                     help="x,y,z,yaw of base_link in the world (m, rad)")
+    ap.add_argument("--map-pose", type=parse_pose, default=None,
+                    help="x,y,z,yaw of base_link in the map frame instead (a world.yaml's "
+                         "map_origin is taken off): a start pose as the map's own coordinates")
     ap.add_argument("--frame-rate", type=float, default=20.0, help="frames per second (Hz)")
     ap.add_argument("--physics-dt", type=float, default=1 / 60, help="physics step (s)")
     ap.add_argument("--display", default="", help="X display for a window; empty: headless")
@@ -191,6 +208,8 @@ def main(argv=None):
     world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
     stage = omni.usd.get_context().get_stage()
     usd, projector = world_files(args.world)
+    if args.map_pose is not None:
+        args.pose = world_pose(args.map_pose, args.world)
     log.info("GNSS projector: %s", projector.name if projector else "TransverseMercator at (0, 0)")
     if usd:
         add_reference_to_stage(usd_path=usd, prim_path="/World/env")

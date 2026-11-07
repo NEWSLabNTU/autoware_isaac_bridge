@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# aib's stand-alone runner as a ROS executable: one ego in an Isaac world, no swb, no SSv2
+# (aib_launch isaac_vehicle.launch.xml; python -m aib.runner --help for the options).
+#
+#   aib_isaac_vehicle --ego <ego.yaml> [--world <world.yaml|usd>] [--map-pose x,y,z,yaw]
+#                     [--render auto|window|headless] [--view chase|free] [--realtime true]
+#                     [--ros-args ...]
+#
+# The runner is Python 3.12 in Isaac's venv with Isaac's own ROS 2 libraries
+# (share/aib/scripts/isaac_env.sh): the system Humble the launch runs under must not leak into
+# it, so its paths are dropped first, after the aib package is found. The launch's --ros-args
+# mean nothing to it and are dropped too; the ROS domain is the ego config's.
+#
+# Environment: ISAAC_ROOT (Isaac Sim 6.1's install), DISPLAY (render auto/window),
+# ISAAC_HEADLESS=1 (render auto: headless), ISAAC_KIT_ARGS (extra Kit settings, e.g. the GPU),
+# RMW_IMPLEMENTATION and CYCLONEDDS_URI (passed through: Autoware's DDS).
+set -e
+# Where aib's Python package is (the install's, or the source tree a symlink install points to)
+aib_parent=$(python3 -c 'import aib, os; print(os.path.dirname(os.path.dirname(os.path.realpath(aib.__file__))))')
+share=$(python3 -c 'from ament_index_python.packages import get_package_share_directory as g; print(g("aib"))')
+
+args=(); render=auto; realtime=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ros-args) break ;;
+        # --opt=value (what aib_launch passes, so that an empty value stays one argument), or
+        # --opt value; an empty value means the runner's default.
+        --render=*) render="${1#*=}"; shift ;;
+        --realtime=*) realtime="${1#*=}"; shift ;;
+        --render) render="$2"; shift 2 ;;
+        --realtime) realtime="$2"; shift 2 ;;
+        --ego=*|--world=*|--map-pose=*|--pose=*|--view=*|--frame-rate=*|--duration=*)
+            [ -n "${1#*=}" ] && args+=("${1%%=*}" "${1#*=}"); shift ;;
+        --ego|--world|--map-pose|--pose|--view|--frame-rate|--duration)
+            [ -n "$2" ] && args+=("$1" "$2"); shift 2 ;;
+        *) echo "aib_isaac_vehicle: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+done
+case "$realtime" in true|1) args+=(--realtime) ;; esac
+display="${DISPLAY:-}"
+case "$render" in
+    auto) [ -n "${ISAAC_HEADLESS:-}" ] && [ "${ISAAC_HEADLESS}" != 0 ] && display="" ;;
+    window) [ -n "$display" ] || { echo "aib_isaac_vehicle: render window needs DISPLAY" >&2; exit 2; } ;;
+    headless) display="" ;;
+    *) echo "aib_isaac_vehicle: render '$render' is not auto, window or headless" >&2; exit 2 ;;
+esac
+[ -n "$display" ] && args+=(--display "$display")
+[ -n "${ISAAC_ROOT:-}" ] || { echo "aib_isaac_vehicle: ISAAC_ROOT is not set (Isaac Sim 6.1's install)" >&2; exit 2; }
+
+# The system ROS 2 environment out, Isaac's in.
+unset PYTHONPATH PYTHONHOME LD_LIBRARY_PATH AMENT_PREFIX_PATH CMAKE_PREFIX_PATH \
+    COLCON_PREFIX_PATH PKG_CONFIG_PATH ROS_PACKAGE_PATH ROS_LOCALHOST_ONLY ROS_VERSION \
+    ROS_PYTHON_VERSION VIRTUAL_ENV
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/ros/\|^/opt/autoware/\|/install/' | paste -sd:)
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+# shellcheck source=/dev/null
+source "$share/scripts/isaac_env.sh"
+export PYTHONPATH="$aib_parent${PYTHONPATH:+:$PYTHONPATH}"
+echo "aib_isaac_vehicle: python -m aib.runner ${args[*]}"
+exec python -u -m aib.runner "${args[@]}"

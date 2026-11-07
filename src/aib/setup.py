@@ -13,6 +13,8 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         ("share/" + package_name + "/scripts", glob("scripts/*.sh")),
+        # the stand-alone runner as a ROS executable (aib_launch isaac_vehicle.launch.xml)
+        ("lib/" + package_name, ["scripts/aib_isaac_vehicle"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
