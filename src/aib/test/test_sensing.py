@@ -142,6 +142,24 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(len(data), 4 * 16)
         self.assertEqual(pack_cloud(np.zeros((0, 3)), np.float32(0.5), np.float32(0.1))[0], 0)
 
+    def test_nebula_layout(self):
+        # A VLP-32C's lasers are not evenly spaced: each elevation its own channel (rings),
+        # and Nebula's PointXYZIRCAEDT for the cart's preprocessor.
+        xyz = np.array([[0, 2, 0], [-3, 0, 4], [1, -1, 0], [2, 0, 0]], dtype=np.float32)
+        elev = [-0.436, -0.017, -0.017, 0.262]
+        n, data = pack_cloud(xyz, None, elev, fmt="xyzircaedt", rings=True)
+        self.assertEqual((n, len(data)), (4, 4 * 32))
+        rec = np.frombuffer(data, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+                                         ("intensity", "u1"), ("return_type", "u1"),
+                                         ("channel", "<u2"), ("azimuth", "<f4"),
+                                         ("elevation", "<f4"), ("distance", "<f4"),
+                                         ("time_stamp", "<u4")])
+        self.assertEqual(rec["channel"].tolist(), [0, 1, 1, 2])
+        self.assertTrue(np.allclose(rec["azimuth"], [np.pi / 2, np.pi, 1.75 * np.pi, 0.0]))
+        self.assertTrue(np.allclose(rec["elevation"], [0.0, np.arctan2(4, 3), 0.0, 0.0]))
+        self.assertTrue(np.allclose(rec["distance"], [2.0, 5.0, np.sqrt(2), 2.0]))
+        self.assertEqual(rec["time_stamp"].tolist(), [0, 0, 0, 0])
+
 
 class MiscTest(unittest.TestCase):
     def test_the_usd_camera_looks_down_the_link_x(self):

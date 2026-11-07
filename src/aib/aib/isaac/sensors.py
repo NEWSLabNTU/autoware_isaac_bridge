@@ -10,9 +10,11 @@ import array
 import collections
 import logging
 
-from ..frames import advance, compose
-from ..sensing import (APERTURE_MM, USD_CAMERA_IN_LINK, Periodic, gnss_reading, imu_reading,
-                       pack_cloud)
+import os
+
+from ..frames import advance, compose, qrot, rpy_quat
+from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, gnss_reading,
+                       imu_reading, pack_cloud)
 
 log = logging.getLogger("aib")
 
@@ -25,6 +27,13 @@ def _mount(stage, path, transform):
     x.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*t))
     x.AddOrientOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(*q))
     return x
+
+
+def _matrix(q):
+    """The rotation matrix of unit quaternion q (w, x, y, z): columns are the rotated axes."""
+    import numpy as np
+
+    return np.array([qrot(q, e) for e in ((1, 0, 0), (0, 1, 0), (0, 0, 1))]).T
 
 
 # The lidars: beside the vehicles, not under them (`Lidar`)
@@ -74,10 +83,21 @@ class Lidar:
         kept = Lidar.kept.get(root)
         # The annotator holds the frame the last vehicle's lidar saw: two renders of its own
         self.fresh = 2
+        # The emitter in the message frame: an Isaac lidar emits along its prim's +x with +z up;
+        # a sensor whose driver publishes in its own axes (the golf cart's Seyond Falcon: x up,
+        # y right, z forward) names the emitter's rotation in that frame, `emitter_rpy`, and
+        # its points are turned back into the frame before they go out.
+        self.q_emit = rpy_quat(*(float(a) for a in rig.isaac.get("emitter_rpy", (0, 0, 0))))
+        self.mount = compose(rig.transform, ((0.0, 0.0, 0.0), self.q_emit))
         if kept is None or not stage.GetPrimAtPath(kept[0]):
-            ops = _mount(stage, root, rig.transform).GetOrderedXformOps()
-            lidar = RtxLidar.create(f"{root}/lidar", config=rig.isaac.get("config", "OS1"),
-                                    variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"))
+            ops = _mount(stage, root, self.mount).GetOrderedXformOps()
+            usd = rig.isaac.get("usd")
+            if usd:
+                # An OmniLidar profile of our own (a lidar Isaac does not ship), by path
+                lidar = RtxLidar.create(f"{root}/lidar", usd_path=os.path.expandvars(usd))
+            else:
+                lidar = RtxLidar.create(f"{root}/lidar", config=rig.isaac.get("config", "OS1"),
+                                        variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"))
             rp = rep.create.render_product(lidar.paths[0], resolution=(128, 128))
             annotator = rep.AnnotatorRegistry.get_annotator("IsaacExtractRTXSensorPointCloud")
             annotator.attach([rp.path])
@@ -85,6 +105,12 @@ class Lidar:
             self.fresh = 0
         path, self.render_product, self.annotator, (self.translate, self.orient) = kept
         self.channels = int(rig.extra.get("channels", 128))
+        # `xyzirc` (default) or `xyzircaedt` (Nebula's, as a real Velodyne driver publishes)
+        self.point_format = rig.isaac.get("point_format", "xyzirc")
+        if self.point_format not in POINT_FORMATS:
+            raise ValueError(f"lidar {rig.name}: point_format {self.point_format!r}, "
+                             f"not one of {sorted(POINT_FORMATS)}")
+        self.rings = bool(rig.isaac.get("rings_by_elevation", False))
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
@@ -95,7 +121,7 @@ class Lidar:
     def before_substep(self, vehicle, state, dt):
         from pxr import Gf
 
-        (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.rig.transform)
+        (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.mount)
         self.translate.Set(Gf.Vec3d(x, y, z))
         self.orient.Set(Gf.Quatd(*q))
 
@@ -119,8 +145,14 @@ class Lidar:
         if not isinstance(d, dict) or not len(d.get("data", [])):
             return None
         info = d.get("info", {})
-        n, data = pack_cloud(d["data"], info.get("intensity"), info.get("elevation"),
-                             self.channels)
+        xyz = d["data"]
+        if self.q_emit != (1.0, 0.0, 0.0, 0.0):
+            import numpy as np
+
+            xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
+        n, data = pack_cloud(xyz, info.get("intensity"), info.get("elevation"), self.channels,
+                             fmt=self.point_format, rings=self.rings)
+        fields, step = POINT_FORMATS[self.point_format]
         m = self.ros.m
         PF = m["PointField"]
         msg = m["PointCloud2"]()
@@ -128,15 +160,12 @@ class Lidar:
         msg.header.frame_id = self.rig.frame
         msg.height = 1
         msg.width = n
-        msg.fields = [PF(name="x", offset=0, datatype=PF.FLOAT32, count=1),
-                      PF(name="y", offset=4, datatype=PF.FLOAT32, count=1),
-                      PF(name="z", offset=8, datatype=PF.FLOAT32, count=1),
-                      PF(name="intensity", offset=12, datatype=PF.UINT8, count=1),
-                      PF(name="return_type", offset=13, datatype=PF.UINT8, count=1),
-                      PF(name="channel", offset=14, datatype=PF.UINT16, count=1)]
+        types = {"f4": PF.FLOAT32, "u1": PF.UINT8, "u2": PF.UINT16, "u4": PF.UINT32}
+        msg.fields = [PF(name=name, offset=off, datatype=types[t], count=1)
+                      for name, off, t in fields]
         msg.is_bigendian = False
-        msg.point_step = 16
-        msg.row_step = 16 * n
+        msg.point_step = step
+        msg.row_step = step * n
         msg.is_dense = True
         # array.array, not bytes: rclpy copies an array in C, bytes element by element (40 ms)
         msg.data = array.array("B", data)

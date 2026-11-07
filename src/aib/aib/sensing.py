@@ -10,6 +10,12 @@ GRAVITY = 9.81
 CLOUD_FIELDS = (("x", 0, "f4"), ("y", 4, "f4"), ("z", 8, "f4"), ("intensity", 12, "u1"),
                 ("return_type", 13, "u1"), ("channel", 14, "u2"))
 POINT_STEP = 16
+# Nebula's PointXYZIRCAEDT (autoware_point_types), what a real Velodyne driver publishes and
+# what Autoware's distortion corrector and ring outlier filter read: the above, then azimuth,
+# elevation and distance (rad, rad, m) and time_stamp (ns after the header's stamp).
+CLOUD_FIELDS_AEDT = CLOUD_FIELDS + (("azimuth", 16, "f4"), ("elevation", 20, "f4"),
+                                    ("distance", 24, "f4"), ("time_stamp", 28, "u4"))
+POINT_FORMATS = {"xyzirc": (CLOUD_FIELDS, 16), "xyzircaedt": (CLOUD_FIELDS_AEDT, 32)}
 # A USD camera looks down its -Z with +Y up; a rig's camera link is x forward, z up: the
 # camera prim's orientation in the link.
 USD_CAMERA_IN_LINK = (0.5, 0.5, -0.5, -0.5)
@@ -55,15 +61,19 @@ def pose_covariance(variances):
     return c
 
 
-def pack_cloud(xyz, intensity=None, elevation=None, channels=128):
-    """Points (N x 3, sensor frame) to PointCloud2 bytes in CLOUD_FIELDS' layout. Intensity
-    in [0, 1] becomes 0-255; the channel is the elevation's rank among `channels` rings."""
+def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", rings=False):
+    """Points (N x 3, sensor frame) to PointCloud2 bytes in `fmt`'s layout (POINT_FORMATS).
+    Intensity in [0, 1] becomes 0-255. The channel is the elevation's place among `channels`
+    evenly spaced rings, or with `rings` its rank among the elevations the scan has (a lidar
+    whose lasers are not evenly spaced, as a VLP-32C's: each laser its own channel).
+    `xyzircaedt` adds azimuth (atan2(y, x) in [0, 2 pi)), elevation and distance from the
+    point, and a time_stamp of 0: a frame's points share its stamp."""
     import numpy as np
 
     xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
     n = len(xyz)
-    cloud = np.zeros(n, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("intensity", "u1"),
-                               ("return_type", "u1"), ("channel", "<u2")])
+    fields, _ = POINT_FORMATS[fmt]
+    cloud = np.zeros(n, dtype=[(name, "<" + t if t != "u1" else t) for name, _, t in fields])
     cloud["x"], cloud["y"], cloud["z"] = xyz[:, 0], xyz[:, 1], xyz[:, 2]
     if intensity is not None:
         # Flat: the RTX lidar's annotator hands a 0-d array when it has nothing per point, which
@@ -73,11 +83,20 @@ def pack_cloud(xyz, intensity=None, elevation=None, channels=128):
             cloud["intensity"] = np.clip(inten * 255.0, 0, 255).astype(np.uint8)
     if elevation is not None:
         elev = np.asarray(elevation, dtype=np.float32).reshape(-1)
-        if len(elev) == n and n:
+        if len(elev) == n and n and rings:
+            _, rank = np.unique(np.round(elev, 4), return_inverse=True)
+            cloud["channel"] = rank.reshape(-1).astype(np.uint16)
+        elif len(elev) == n and n:
             lo, hi = float(elev.min()), float(elev.max())
             if hi > lo:
                 cloud["channel"] = np.rint((elev - lo) / (hi - lo) * (channels - 1)).astype(np.uint16)
     cloud["return_type"] = 1
+    if fmt == "xyzircaedt" and n:
+        x, y, z = (xyz[:, i].astype(np.float64) for i in range(3))
+        horiz = np.hypot(x, y)
+        cloud["azimuth"] = np.mod(np.arctan2(y, x), 2.0 * np.pi)
+        cloud["elevation"] = np.arctan2(z, horiz)
+        cloud["distance"] = np.hypot(horiz, z)
     return n, cloud.tobytes()
 
 
