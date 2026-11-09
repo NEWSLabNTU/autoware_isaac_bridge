@@ -89,6 +89,37 @@ UTM_K0 = 0.9996
 MGRS_BANDS = "CDEFGHJKLMNPQRSTUVWX"  # 8 deg each from 80 S (X: 72-84 N)
 
 
+# the forward series, for the northing of a latitude on the central meridian
+_ALPHA = (_N / 2 - 2 * _N ** 2 / 3 + 5 * _N ** 3 / 16, 13 * _N ** 2 / 48 - 3 * _N ** 3 / 5,
+          61 * _N ** 3 / 240)
+
+
+def tm_meridian_northing(lat, k0=UTM_K0):
+    """The transverse Mercator northing (m) of latitude `lat` (degrees) on the central
+    meridian: the meridian arc, scaled by k0 (Krueger's forward series)."""
+    phi = math.radians(lat)
+    e = math.sqrt(_F * (2 - _F))
+    t = math.sinh(math.atanh(math.sin(phi)) - e * math.atanh(e * math.sin(phi)))
+    xi = math.atan(t)
+    return k0 * _A * (xi + sum(a * math.sin(2 * j * xi) for j, a in enumerate(_ALPHA, 1)))
+
+
+def tm_lat_lon(east, north, lon0, k0=UTM_K0):
+    """Transverse Mercator (`east` from the central meridian `lon0`, degrees; `north` from the
+    equator; m) to WGS84 degrees: the inverse Krueger series, millimetres within thousands of
+    km of the meridian."""
+    xi = north / (k0 * _A)
+    eta = east / (k0 * _A)
+    xi_p, eta_p = xi, eta
+    for j, b in enumerate(_BETA, 1):
+        xi_p -= b * math.sin(2 * j * xi) * math.cosh(2 * j * eta)
+        eta_p -= b * math.cos(2 * j * xi) * math.sinh(2 * j * eta)
+    chi = math.asin(math.sin(xi_p) / math.cosh(eta_p))
+    lat = chi + sum(d * math.sin(2 * j * chi) for j, d in enumerate(_DELTA, 1))
+    lon = math.radians(lon0) + math.atan2(math.sinh(eta_p), math.cos(xi_p))
+    return math.degrees(lat), math.degrees(lon)
+
+
 def utm_lat_lon(zone, north, easting, northing):
     """UTM (zone 1-60, hemisphere) to WGS84 degrees."""
     xi = (northing - (0.0 if north else 10_000_000.0)) / (UTM_K0 * _A)
@@ -128,16 +159,24 @@ class Projector:
     `map_projector_info.yaml`. MGRS adds its 100 km square's corner and inverts UTM; without
     a projector file the map is TransverseMercator at (0, 0) (`lat_lon`, CARLA's towns)."""
 
-    def __init__(self, map_origin=(0.0, 0.0, 0.0), mgrs=None):
+    def __init__(self, map_origin=(0.0, 0.0, 0.0), mgrs=None, tm_origin=None):
         self.origin = tuple(float(v) for v in map_origin)
         self.mgrs = mgrs_origin(mgrs) if mgrs else None
-        self.name = f"MGRS {mgrs}" if mgrs else "TransverseMercator at (0, 0)"
+        # Autoware's TransverseMercatorProjector about (lat, lon): GeographicLib's exact TM,
+        # k0 0.9996, central meridian at the origin, x/y from the origin's projection
+        self.tm = None
+        if tm_origin is not None:
+            lat0, lon0 = (float(v) for v in tm_origin)
+            self.tm = (lon0, tm_meridian_northing(lat0))
+        self.name = (f"MGRS {mgrs}" if mgrs else
+                     f"TransverseMercator at ({tm_origin[0]}, {tm_origin[1]})" if tm_origin else
+                     "TransverseMercator at (0, 0)")
 
     @classmethod
     def from_map(cls, map_dir, map_origin=(0.0, 0.0, 0.0)):
-        """The map dir's projector: MGRS, or none or TransverseMercator at (0, 0) (CARLA's
-        towns). Another projector, or TransverseMercator about another origin, is refused
-        rather than published wrong."""
+        """The map dir's projector: MGRS, TransverseMercator (at (0, 0), CARLA's towns, or about
+        any origin, as Autoware projects it), or none. Another projector is refused rather than
+        published wrong."""
         import os
 
         import yaml
@@ -155,15 +194,19 @@ class Projector:
         if kind == "TransverseMercator":
             # what download_maps.sh writes for CARLA's towns: the same frame as no file
             o = info.get("map_origin") or {}
-            if float(o.get("latitude", 0.0)) or float(o.get("longitude", 0.0)):
-                raise ValueError(f"{path}: TransverseMercator is supported only at latitude 0, "
-                                 f"longitude 0 (CARLA's towns), not {o}")
+            lat0, lon0 = float(o.get("latitude", 0.0)), float(o.get("longitude", 0.0))
+            if lat0 or lon0:
+                return cls(map_origin, tm_origin=(lat0, lon0))
             return cls(map_origin)
-        raise ValueError(f"{path}: projector_type {kind} is not supported (MGRS or none)")
+        raise ValueError(f"{path}: projector_type {kind} is not supported "
+                         "(MGRS, TransverseMercator or none)")
 
     def lat_lon_alt(self, x, y, z):
         mx, my, mz = x + self.origin[0], y + self.origin[1], z + self.origin[2]
-        if self.mgrs is None:
+        if self.tm is not None:
+            lon0, n0 = self.tm
+            lat, lon = tm_lat_lon(mx, my + n0, lon0)
+        elif self.mgrs is None:
             lat, lon = lat_lon(mx, my)
         else:
             zone, north, e0, n0 = self.mgrs

@@ -89,6 +89,25 @@ class GnssTest(unittest.TestCase):
         self.assertLess(math.hypot(north, east), 0.002)
         self.assertAlmostEqual(alt, 11.8783)
 
+    def test_transverse_mercator_about_an_origin_matches_the_maps_own_lat_lon(self):
+        # node 10300004601 of NTU COSS's Lanelet2 map (AutoSDV's car A twin): Autoware's
+        # TransverseMercator (GeographicLib exact, k0 0.9996) about map_projector_info's origin
+        # puts its lat/lon at local_x/local_y less TWD97 of that origin
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "map_projector_info.yaml"), "w") as f:
+                f.write("projector_type: TransverseMercator\nvertical_datum: WGS84\n"
+                        "map_origin: {latitude: 25.0201, longitude: 121.5423, altitude: 25.0}\n")
+            p = frames.Projector.from_map(d)
+        x, y = 304774.8604 - 304731.3793, 2768128.0634 - 2768113.4495
+        lat, lon, alt = p.lat_lon_alt(x, y, 8.9764)
+        north = (lat - 25.0202319785) * 111_320.0
+        east = (lon - 121.54273096174) * 111_320.0 * math.cos(math.radians(lat))
+        self.assertLess(math.hypot(north, east), 0.002)
+        self.assertAlmostEqual(alt, 8.9764)
+
     def test_the_reading_takes_the_projector(self):
         p = frames.Projector((52_500.0, 67_700.0, 0.0), "51RUH")
         s = State(position=(-282.5064, -48.3548, 11.8783), quat=(1.0, 0.0, 0.0, 0.0))
@@ -110,11 +129,13 @@ class GnssTest(unittest.TestCase):
                          "map_origin: {latitude: 0.0, longitude: 0.0, altitude: 0.0}\n")
             p = frames.Projector.from_map(d)
             self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
+            # about another origin it was refused; it is projected now (the COSS test above)
             with open(f, "w") as fh:
                 fh.write("projector_type: TransverseMercator\n"
                          "map_origin: {latitude: 25.0, longitude: 121.5}\n")
-            with self.assertRaisesRegex(ValueError, "only at latitude 0, longitude 0"):
-                frames.Projector.from_map(d)
+            lat, lon, _ = frames.Projector.from_map(d).lat_lon_alt(0.0, 0.0, 0.0)
+            self.assertAlmostEqual(lat, 25.0, places=7)   # the series: ~0.3 mm
+            self.assertAlmostEqual(lon, 121.5, places=7)
 
 
 class CloudTest(unittest.TestCase):
