@@ -43,6 +43,23 @@ play_launch launch aib_launch isaac_vehicle.launch.xml ego:=<your repository>/is
     world:=<map>/isaac/world.yaml map_pose:=x,y,z,yaw
 ```
 
+Checked against its spec on the flat plane, with no Autoware (`just vehicle-check`): pass the
+spec and the car's own Autoware description, since neither is in sim_vehicle_spec or aib:
+
+```bash
+ROS_DOMAIN_ID=<free> just vehicle-check ego:=<your repository>/isaac/ego.yaml \
+    spec:=<your repository>/vehicle/<car>.yaml \
+    vehicle_model:=<your>_vehicle sensor_model:=<your>_sensor_kit \
+    config_dir:=<the calibration directory your sensor kit URDF reads>
+```
+
+An ego config without `domain:` runs on `ROS_DOMAIN_ID`, as the runner does. A car whose top
+speed is below the check's 6 m/s runs its dynamics steps at speeds scaled to it
+(autoware_sim_check `dynamics.speeds_for`). A small car also needs its own brake floor in the
+ego config (`ecu: {brake_floor: <N m>}`): the default, 50 N m, is a road car's, and every
+lighter brake request under it is dropped. AutoSDV's car A twin (a 5 kg 1/10 car) is the
+worked example: `src/simulation/autosdv_twin` in NEWSLabNTU/AutoSDV.
+
 Under SSv2 (swb's Isaac world server): its `ego_config` launch argument takes the same ego
 config. The bridge's spec check then also needs the car's SSv2 catalog entry and the vehicle
 agent's spec_hash; scenario-world-bridge's `docs/design/vehicle-side.md` lists those slots.

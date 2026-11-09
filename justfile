@@ -126,20 +126,30 @@ isaac-ego *args:
 # config's ROS domain. Writes <out>/report.json; exits 0 only if every check passed.
 #
 # Usage: just vehicle-check [ego:=<yaml>] [out:=<dir>]
+#        [spec:=<yaml>] [vehicle_model:=<pkg prefix>] [sensor_model:=<pkg prefix>] [config_dir:=<dir>]
+#
+# A car from another repository (docs/vehicle-from-another-repository.md) passes its spec and
+# its own Autoware description: the vehicle_model and sensor_model packages and the calibration
+# directory its URDF reads. An ego config without `domain:` runs on ROS_DOMAIN_ID, as the
+# runner does (0 when unset).
 [positional-arguments]
 vehicle-check *args:
     #!/usr/bin/env bash
     set -e
     ego="{{project}}/src/aib/config/ego.yaml"; out="{{project}}/play_log/vehicle_check/$(date +%F_%H-%M-%S)"
+    desc=(); model_arg=""
     for a in "$@"; do
         case "$a" in
             ego:=?*) ego="${a#*:=}" ;;
             out:=?*) out="${a#*:=}" ;;
-            *) echo "unknown argument $a (ego:=, out:=)" >&2; exit 2 ;;
+            spec:=?*) desc+=(spec:="$(realpath "${a#*:=}")") ;;
+            vehicle_model:=?*) model_arg="${a#*:=}" ;;
+            sensor_model:=?*|config_dir:=?*) desc+=("$a") ;;
+            *) echo "unknown argument $a (ego:=, out:=, spec:=, vehicle_model:=, sensor_model:=, config_dir:=)" >&2; exit 2 ;;
         esac
     done
     mkdir -p "$out"
-    export ROS_DOMAIN_ID=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1])).get("domain", 1))' "$ego")
+    export ROS_DOMAIN_ID=$(python3 -c 'import os, sys, yaml; print(yaml.safe_load(open(sys.argv[1])).get("domain", os.environ.get("ROS_DOMAIN_ID", 0)))' "$ego")
     groups=()
     stop() { for g in "${groups[@]}"; do kill -TERM -"$g" 2>/dev/null || true; done
              sleep 20; for g in "${groups[@]}"; do kill -KILL -"$g" 2>/dev/null || true; done; }
@@ -161,9 +171,10 @@ vehicle-check *args:
     ego = sys.argv[1]
     rig = os.path.join(os.path.dirname(ego), yaml.safe_load(open(ego))["rig"])
     print(yaml.safe_load(open(rig)).get("name", "tesla_model3"))' "$ego")
+    model="${model_arg:-$model}"
     play_launch launch --disable-web-ui --log-dir "$out/check_log" \
         autoware_sim_check vehicle_check.launch.xml simulator:=isaac vehicle_model:="$model" \
-        out:="$out/report.json" > "$out/check.log" 2>&1 < /dev/null || true
+        out:="$out/report.json" "${desc[@]}" > "$out/check.log" 2>&1 < /dev/null || true
     [ -f "$out/report.json" ] || { echo "[vehicle-check] no report; see $out/check.log" >&2; exit 1; }
     python3 - "$out/report.json" <<'PY'
     import json, sys
