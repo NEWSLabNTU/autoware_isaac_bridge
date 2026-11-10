@@ -13,8 +13,9 @@ import logging
 import os
 
 from ..frames import advance, compose, qrot, rpy_quat
-from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, gnss_reading,
-                       imu_reading, pack_cloud)
+from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
+                       gnss_reading, imu_reading, motion_distort, pack_cloud, point_times,
+                       sample_index)
 
 log = logging.getLogger("aib")
 
@@ -68,7 +69,18 @@ class Lidar:
     render product are made once per vehicle path and sensor, under `SENSORS`, and kept for
     the next vehicle at that path (swb's world server spawns its egos at the same paths).
     Before each substep the host calls `before_substep`, which puts the lidar where its mount
-    will be after that substep."""
+    will be after that substep.
+
+    As a driver publishes it (rig `isaac:` keys, each defaulting to what a real spinning lidar
+    does when the point format carries per-point times, `xyzircaedt`):
+    - `publish: scan` sends each revolution once, at the profile's scan rate; `frame` sends
+      what the annotator holds every frame (a 10 Hz profile under 20 Hz frames: each scan
+      twice). Default `scan`.
+    - `point_times`: each point's firing time after the header's stamp (the annotator's
+      timestamps), the header at the revolution's first point. Default on for `xyzircaedt`.
+    - `motion_distortion`: each point as the sensor saw it from where it was at that time,
+      not from the one pose the revolution was rendered from (Autoware's distortion corrector
+      undoes it, as on the vehicle). Default `point_times`."""
 
     renders = True
     kept = {}  # its mount's prim path -> (lidar prim path, render product, annotator, ops)
@@ -115,6 +127,15 @@ class Lidar:
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
         self.stamps = collections.deque(maxlen=self.latency + 1)  # the last frames' stamps
+        aedt = self.point_format == "xyzircaedt"
+        self.per_scan = rig.isaac.get("publish", "scan") == "scan"
+        self.point_times = bool(rig.isaac.get("point_times", aedt)) and aedt
+        self.distort = bool(rig.isaac.get("motion_distortion", self.point_times)) and self.point_times
+        self.gate = ScanGate()
+        # The world's clock (the annotator's timestamps run on it) and the sensor's trajectory
+        # on it, a substep apart, for the motion a revolution spans
+        self.clock, self.frame_dt, self.frame_start = 0.0, 0.0, 0.0
+        self.track = collections.deque(maxlen=256)
         log.info("lidar %s: %s at %s in base_link%s", rig.name, path, rig.translation,
                  " (kept from the last vehicle at this path)" if self.fresh else "")
 
@@ -124,6 +145,8 @@ class Lidar:
         (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.mount)
         self.translate.Set(Gf.Vec3d(x, y, z))
         self.orient.Set(Gf.Quatd(*q))
+        self.clock += dt
+        self.track.append((self.clock, (x, y, z), tuple(q)))
 
     def ready(self):
         if self.fresh > 0:
@@ -137,21 +160,46 @@ class Lidar:
             self.pub.publish(self.pending)
             self.ros.note_scan(self.pending.header.stamp)  # what the lockstep waits for
         self.stamps.append(stamp)
+        self.frame_dt, self.frame_start = self.clock - self.frame_start, self.clock
         # the data read now was rendered `latency` frames ago: until then there is no stamp for it
-        self.pending = self._msg(self.stamps[0]) if len(self.stamps) > self.latency else None
+        self.pending = (self._msg(self.stamps[0], sim_time - self.clock)
+                        if len(self.stamps) > self.latency else None)
 
-    def _msg(self, stamp):
+    def _msg(self, stamp, to_sim):
+        """The scan the annotator holds, or None (nothing yet, or `publish: scan` and this
+        revolution already sent). `to_sim`: the host's sim time less the world's clock."""
+        import numpy as np
+
         d = self.annotator.get_data()
         if not isinstance(d, dict) or not len(d.get("data", [])):
             return None
         info = d.get("info", {})
         xyz = d["data"]
+        n_pts = len(np.asarray(xyz).reshape(-1, 3))
+        ts = np.asarray(info.get("timestamp", ())).reshape(-1)
+        ts = ts if len(ts) == n_pts else None
+        if self.per_scan and ts is not None and not self.gate.new(ts):
+            return None
+        offsets = None
+        if self.point_times and ts is not None:
+            t0, offsets = point_times(ts)
+            if not getattr(self, "_told", False):
+                self._told = True
+                log.info("lidar %s: %d points a revolution over %.1f ms, first at world %.3f s "
+                         "(clock %.3f s)", self.rig.name, n_pts, int(offsets.max()) * 1e-6,
+                         t0 * 1e-9, self.clock)
+            stamp = self.ros.stamp(t0 * 1e-9 + to_sim)
+            if self.distort and len(self.track) > 1:
+                # rendered from the pose `latency` frames back; fired over the revolution
+                t_ref = self.clock - self.latency * self.frame_dt
+                tr = list(self.track)
+                xyz = motion_distort(xyz, ts.astype(np.float64) * 1e-9, t_ref,
+                                     [a for a, _, _ in tr], [b for _, b, _ in tr],
+                                     [c for _, _, c in tr])
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
-            import numpy as np
-
             xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
         n, data = pack_cloud(xyz, info.get("intensity"), info.get("elevation"), self.channels,
-                             fmt=self.point_format, rings=self.rings)
+                             fmt=self.point_format, rings=self.rings, time_stamp=offsets)
         fields, step = POINT_FORMATS[self.point_format]
         m = self.ros.m
         PF = m["PointField"]
@@ -269,14 +317,29 @@ class Imu:
         self.rig, self.ros = rig, ros
         self.pub, _ = ros.sensor_publisher(rig)
         self.timer = Periodic(rig.period)
+        # Faster than the frames (a ZED's 100 Hz under 20 Hz frames): every tick of its own
+        # clock, each from the last substep's state at or before it, as the hardware samples
+        self.ticks = Ticks(rig.period) if rig.period > 0 else None
+        self.clock = 0.0
+        self.samples = collections.deque(maxlen=512)  # (world time, reading), a substep apart
 
     def ready(self):
         return True
 
     def publish(self, state, sim_time, stamp):
-        if not self.timer.due(sim_time):
+        if self.ticks is None:
+            if self.timer.due(sim_time):
+                self._send(imu_reading(state, self.rig.quat), stamp)
             return
-        q, gyro, acc = imu_reading(state, self.rig.quat)
+        self.samples.append((self.clock, imu_reading(state, self.rig.quat)))
+        to_sim = sim_time - self.clock
+        times = [t for t, _ in self.samples]
+        for tick in self.ticks.due(sim_time):
+            reading = self.samples[sample_index(times, tick - to_sim)][1]
+            self._send(reading, self.ros.stamp(tick))
+
+    def _send(self, reading, stamp):
+        q, gyro, acc = reading
         msg = self.ros.m["Imu"]()
         msg.header.stamp = stamp
         msg.header.frame_id = self.rig.frame
@@ -286,7 +349,10 @@ class Imu:
         self.pub.publish(msg)
 
     def before_substep(self, vehicle, state, dt):
-        pass  # read from the vehicle's state
+        # `state` is the body after the last substep, at the clock before this one
+        if self.ticks is not None:
+            self.samples.append((self.clock, imu_reading(state, self.rig.quat)))
+        self.clock += dt
 
     def close(self):
         pass

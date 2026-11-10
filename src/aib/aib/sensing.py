@@ -61,13 +61,15 @@ def pose_covariance(variances):
     return c
 
 
-def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", rings=False):
+def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", rings=False,
+               time_stamp=None):
     """Points (N x 3, sensor frame) to PointCloud2 bytes in `fmt`'s layout (POINT_FORMATS).
     Intensity in [0, 1] becomes 0-255. The channel is the elevation's place among `channels`
     evenly spaced rings, or with `rings` its rank among the elevations the scan has (a lidar
     whose lasers are not evenly spaced, as a VLP-32C's: each laser its own channel).
     `xyzircaedt` adds azimuth (atan2(y, x) in [0, 2 pi)), elevation and distance from the
-    point, and a time_stamp of 0: a frame's points share its stamp."""
+    point, and each point's time_stamp (ns after the header's stamp, `point_times`), 0 when
+    `time_stamp` is not given: a frame's points then share its stamp."""
     import numpy as np
 
     xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
@@ -97,7 +99,112 @@ def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", 
         cloud["azimuth"] = np.mod(np.arctan2(y, x), 2.0 * np.pi)
         cloud["elevation"] = np.arctan2(z, horiz)
         cloud["distance"] = np.hypot(horiz, z)
+        if time_stamp is not None:
+            ts = np.asarray(time_stamp).reshape(-1)
+            if len(ts) == n:
+                cloud["time_stamp"] = ts.astype(np.uint32)
     return n, cloud.tobytes()
+
+
+class ScanGate:
+    """Lets each lidar revolution through once. The RTX annotator hands the last finished
+    revolution every frame, so a 10 Hz lidar under 20 Hz frames shows each one twice; a driver
+    publishes it once. A revolution is known by its first point's time."""
+
+    def __init__(self):
+        self.last = None
+
+    def new(self, timestamps):
+        import numpy as np
+
+        ts = np.asarray(timestamps).reshape(-1)
+        if not len(ts):
+            return False
+        key = int(ts.min())
+        if key == self.last:
+            return False
+        self.last = key
+        return True
+
+
+def point_times(timestamps):
+    """The annotator's per-point times (ns of sim time) as a driver gives them: the scan's
+    start, and each point's offset after it (uint32 ns, Nebula's time_stamp)."""
+    import numpy as np
+
+    ts = np.asarray(timestamps, dtype=np.uint64).reshape(-1)
+    t0 = int(ts.min()) if len(ts) else 0
+    return t0, (ts - np.uint64(t0)).astype(np.uint32)
+
+
+def _qrot_many(q, v):
+    """Rotate vectors v (N x 3) by unit quaternions q (N x 4, w x y z)."""
+    import numpy as np
+
+    w, u = q[:, :1], q[:, 1:]
+    t = 2.0 * np.cross(u, v)
+    return v + w * t + np.cross(u, t)
+
+
+def _pose_at(t, hist_t, hist_p, hist_q):
+    """Poses at times t from a sampled trajectory: positions linearly, orientations by
+    normalised linear interpolation (the samples are a substep apart)."""
+    import numpy as np
+
+    hist_t = np.asarray(hist_t, dtype=np.float64)
+    hist_p = np.asarray(hist_p, dtype=np.float64)
+    hist_q = np.asarray(hist_q, dtype=np.float64).copy()
+    for i in range(1, len(hist_q)):  # one hemisphere, so neighbours interpolate the short way
+        if np.dot(hist_q[i], hist_q[i - 1]) < 0:
+            hist_q[i] = -hist_q[i]
+    t = np.atleast_1d(np.asarray(t, dtype=np.float64))
+    p = np.stack([np.interp(t, hist_t, hist_p[:, k]) for k in range(3)], axis=1)
+    q = np.stack([np.interp(t, hist_t, hist_q[:, k]) for k in range(4)], axis=1)
+    return p, q / np.linalg.norm(q, axis=1, keepdims=True)
+
+
+def motion_distort(xyz, t_points, t_ref, hist_t, hist_p, hist_q):
+    """What a spinning lidar measures while it moves. The RTX lidar renders a revolution from
+    one pose, the sensor's at `t_ref`; a real one fires each point from wherever it is at that
+    point's time. Each point goes to the world through the pose at `t_ref` and back through the
+    pose at its own time (`t_points`, s), the sensor's trajectory sampled at `hist_t` (s),
+    `hist_p` (N x 3) and `hist_q` (N x 4, w x y z). Autoware's distortion corrector undoes it."""
+    import numpy as np
+
+    xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+    if not len(xyz):
+        return xyz
+    p_ref, q_ref = _pose_at([t_ref], hist_t, hist_p, hist_q)
+    world = _qrot_many(np.repeat(q_ref, len(xyz), axis=0), xyz) + p_ref
+    p_i, q_i = _pose_at(t_points, hist_t, hist_p, hist_q)
+    q_inv = q_i * np.array([1.0, -1.0, -1.0, -1.0])
+    return _qrot_many(q_inv, world - p_i)
+
+
+class Ticks:
+    """A sensor clock faster or slower than the frames: each call gives the ticks of `period`
+    that fell in the frame just ended, the first at the first call's time."""
+
+    def __init__(self, period):
+        self.period = float(period)
+        self.next = None
+
+    def due(self, now):
+        if self.next is None:
+            self.next = now + self.period
+            return [now]
+        out = []
+        while self.next <= now + 1e-9:
+            out.append(self.next)
+            self.next += self.period
+        return out
+
+
+def sample_index(times, t):
+    """The index of the last sample at or before t (the first, when t precedes them all)."""
+    import bisect
+
+    return max(0, bisect.bisect_right(list(times), t + 1e-12) - 1)
 
 
 class Periodic:

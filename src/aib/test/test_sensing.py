@@ -7,8 +7,9 @@ import numpy as np
 _paths = __import__("_paths")  # sys.path, for direct runs
 from aib import frames
 from aib.control import State
-from aib.sensing import (POINT_STEP, USD_CAMERA_IN_LINK, Periodic, gnss_reading,
-                         ground_truth, imu_reading, pack_cloud, pose_covariance)
+from aib.sensing import (POINT_STEP, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks, gnss_reading,
+                         ground_truth, imu_reading, motion_distort, pack_cloud, point_times,
+                         pose_covariance, sample_index)
 
 
 def close(a, b, tol=1e-9):
@@ -220,3 +221,73 @@ class GroundTruthTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScanTest(unittest.TestCase):
+    """A rotating lidar as its driver publishes it: one message a revolution, each point's
+    firing time after the header's stamp, and the motion the sensor made while it spun."""
+
+    def test_a_scan_goes_out_once_though_frames_render_faster_than_it_turns(self):
+        # a 10 Hz lidar under 20 Hz frames: the annotator hands the same revolution twice
+        gate = ScanGate()
+        self.assertTrue(gate.new(np.array([0, 50, 99])))
+        self.assertFalse(gate.new(np.array([0, 50, 99])))
+        self.assertTrue(gate.new(np.array([100, 150, 199])))
+
+    def test_point_times_are_nanoseconds_after_the_scan_start(self):
+        t0, off = point_times(np.array([100_000_000, 100_000_500, 199_994_720], dtype=np.uint64))
+        self.assertEqual(t0, 100_000_000)
+        self.assertEqual(off.dtype, np.uint32)
+        self.assertEqual(list(off), [0, 500, 99_994_720])
+
+    def test_the_cloud_carries_the_point_times(self):
+        n, data = pack_cloud([(1, 0, 0), (0, 1, 0)], fmt="xyzircaedt",
+                             time_stamp=np.array([0, 25_000_000], dtype=np.uint32))
+        rec = np.frombuffer(data, dtype=np.dtype({"names": ["time_stamp"], "formats": ["<u4"],
+                                                  "offsets": [28], "itemsize": 32}))
+        self.assertEqual(list(rec["time_stamp"]), [0, 25_000_000])
+
+    def _history(self, v=(0.0, 0.0, 0.0), yaw_rate=0.0):
+        t = np.linspace(-0.2, 0.3, 81)
+        p = np.outer(t, v)
+        q = np.stack([np.cos(yaw_rate * t / 2), 0 * t, 0 * t, np.sin(yaw_rate * t / 2)], axis=1)
+        return t, p, q
+
+    def test_a_still_sensor_sees_the_scene_as_rendered(self):
+        xyz = np.array([[10.0, 0, 0], [0, 5.0, 1.0]])
+        out = motion_distort(xyz, np.array([0.0, 0.08]), 0.0, *self._history())
+        np.testing.assert_allclose(out, xyz, atol=1e-6)
+
+    def test_a_sensor_moving_forward_sees_a_wall_closer_the_later_it_fires(self):
+        # rendered at t=0 from the sensor's pose then; fired at 0.1 s after 0.2 m of travel
+        xyz = np.array([[10.0, 0, 0], [10.0, 0, 0]])
+        out = motion_distort(xyz, np.array([0.0, 0.1]), 0.0, *self._history(v=(2.0, 0, 0)))
+        np.testing.assert_allclose(out, [[10.0, 0, 0], [9.8, 0, 0]], atol=2e-3)
+
+    def test_a_turning_sensor_sees_the_scene_turn_the_other_way(self):
+        xyz = np.array([[10.0, 0, 0]])
+        out = motion_distort(xyz, np.array([0.1]), 0.0, *self._history(yaw_rate=0.5))
+        a = -0.05  # the sensor yawed +0.05 rad, so the point lies 0.05 rad clockwise
+        np.testing.assert_allclose(out, [[10 * math.cos(a), 10 * math.sin(a), 0]], atol=2e-2)
+
+
+class ImuRateTest(unittest.TestCase):
+    """An IMU faster than the frame rate: every tick of its own clock inside the frame."""
+
+    def test_ticks_run_at_the_imus_rate_across_frames(self):
+        ticks = Ticks(0.01)
+        self.assertEqual(ticks.due(0.05), [0.05])
+        np.testing.assert_allclose(ticks.due(0.10), [0.06, 0.07, 0.08, 0.09, 0.10])
+        np.testing.assert_allclose(ticks.due(0.15), [0.11, 0.12, 0.13, 0.14, 0.15])
+
+    def test_a_slower_imu_skips_frames(self):
+        ticks = Ticks(0.1)
+        self.assertEqual(ticks.due(0.05), [0.05])
+        self.assertEqual(ticks.due(0.10), [])
+        np.testing.assert_allclose(ticks.due(0.15), [0.15])
+
+    def test_a_tick_reads_the_last_state_at_or_before_it(self):
+        t = [0.0, 0.00625, 0.0125, 0.01875]
+        self.assertEqual(sample_index(t, 0.01), 1)
+        self.assertEqual(sample_index(t, 0.0125), 2)
+        self.assertEqual(sample_index(t, 0.5), 3)
