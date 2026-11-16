@@ -10,7 +10,7 @@
 #
 #     src/aib/scripts/build_msgs.sh [package...]
 set -euo pipefail
-I=${ISAAC_ROOT:-/mnt/disk1/isaac-sim}
+I=${ISAAC_ROOT:?ISAAC_ROOT is not set: it names Isaac Sim 6.1\'s pip install; set it (swb: isaac.root in ~/.config/swb/host.yaml)}
 PREFIX=${AUTOWARE_PREFIX:-/opt/autoware/1.5.0}
 OUT=$I/msgs
 PKGS=("$@")

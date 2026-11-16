@@ -6,7 +6,7 @@ project := justfile_directory()
 # /opt/autoware/1.5.0). Override with AUTOWARE_SETUP when yours is elsewhere.
 autoware_setup := env_var_or_default('AUTOWARE_SETUP', '/opt/autoware/1.5.0/setup.bash')
 # Isaac Sim 6.1's pip install (its venv, its bundled ROS 2 Humble). Environment, not a setting.
-isaac_root := env_var_or_default('ISAAC_ROOT', '/mnt/disk1/isaac-sim')
+isaac_root := env_var_or_default('ISAAC_ROOT', '')  # no default (csb 077 G75): set ISAAC_ROOT
 
 # List available recipes
 default:
@@ -187,7 +187,7 @@ vehicle-check *args:
     PY
 
 # Open-loop step tests of the PhysX vehicle and its onboard computers in Isaac, no ROS (aib.steptest):
-#   out:=<dir>          where the CSVs and summary.json go (default /mnt/disk1/aib-ev/steptest)
+#   out:=<dir>          where the CSVs and summary.json go (default play_log/steptest, here)
 #   powertrain:=<model> override the calibration's (ev, ideal)
 #   only:=a,b           some of: launch brake_100 regen_60 steps accel_brake hard_brake limit_brake
 #   set:=k=v            a VehicleParams or Calibration override (JSON values; repeat for more);
@@ -197,7 +197,7 @@ vehicle-check *args:
 isaac-steptest *args:
     #!/usr/bin/env bash
     set -e
-    out=/mnt/disk1/aib-ev/steptest; extra=()
+    out=play_log/steptest; extra=()
     for a in "$@"; do
         case "$a" in
             out:=*) out="${a#out:=}" ;;

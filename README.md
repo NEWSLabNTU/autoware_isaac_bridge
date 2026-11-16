@@ -48,7 +48,7 @@ itself. Every generated file names the spec's `spec_hash`.
 ## Quick start
 
 Prerequisites: Ubuntu 22.04, ROS 2 Humble, Autoware 1.5.0 (`/opt/autoware/1.5.0`), Isaac Sim
-6.1 installed with pip into a venv (`ISAAC_ROOT`, default `/mnt/disk1/isaac-sim`), and
+6.1 installed with pip into a venv (`ISAAC_ROOT`, required: there is no default), and
 `git submodule update --init --recursive` for `deps/sim_vehicle_spec`, `deps/sim_vehicle_ecu` and
 `deps/autoware_sim_vehicle` (the spec; the car's Autoware packages, the profile, the pilot and
 the vehicle check, which `just build` builds).
