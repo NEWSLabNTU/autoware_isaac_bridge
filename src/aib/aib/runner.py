@@ -15,7 +15,7 @@ Autoware's commands -- what scensim's world server does for its ego, without a s
 Autoware on the same domain: `just autoware` (aib_launch isaac_simulator.launch.xml).
 
 `--world` takes a USD, or a map's `isaac/world.yaml` (its `usd:` and `map_origin`, the world
-being the map less it; swb_isaac_world reads the same file). With a world.yaml the GNSS is
+being the map less it; scensim_isaac_world reads the same file). With a world.yaml the GNSS is
 projected as the map is (`<map>/map_projector_info.yaml`, MGRS or none: aib.frames.Projector)
 about `map_origin`, so Autoware's GNSS initialization finds the ego on the map; with a USD or
 no world, about (0, 0) as before. `--pose` is in the world frame.
@@ -39,7 +39,7 @@ import sys
 import time
 
 
-# The window's chase view, as scensim's recorder's "road" view (swb_isaac_world.recorder): 7 m
+# The window's chase view, as scensim's recorder's "road" view (scensim_isaac_world.recorder): 7 m
 # behind base_link, 3.4 m up, pitched 15 deg down, 80 deg across.
 CHASE = {"offset": (-7.0, 0.0, 3.4), "pitch_deg": 15.0, "hfov_deg": 80.0}
 
@@ -79,7 +79,7 @@ def parse_pose(text):
     return (x, y, z), (math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2))
 
 
-# swb_isaac_world's default sun and sky (its world.py: SUN, SKY, SUN_ROTATE), for a world that
+# scensim_isaac_world's default sun and sky (its world.py: SUN, SKY, SUN_ROTATE), for a world that
 # brings no light of its own, as the world server adds them
 SUN, SKY = "/World/sun", "/World/sky"
 SUN_ROTATE = (-50.0, 20.0, 30.0)
@@ -103,7 +103,7 @@ def ensure_light(stage):
 
 def world_files(world):
     """(USD path or "", Projector or None) for `--world`: a USD as it is; a world.yaml's `usd:`
-    (relative to the map dir, the one holding isaac/, as swb_isaac_world resolves it) with the
+    (relative to the map dir, the one holding isaac/, as scensim_isaac_world resolves it) with the
     map's projector about the file's `map_origin`."""
     if not world:
         return "", None
@@ -183,7 +183,7 @@ def main(argv=None):
     from isaacsim import SimulationApp
 
     # Kit uploads a crash's minidump to NVIDIA by default: kept on disk only (its dumpDir).
-    # Host-specific Kit settings (ISAAC_KIT_ARGS, as swb_isaac_world's world server takes them):
+    # Host-specific Kit settings (ISAAC_KIT_ARGS, as scensim_isaac_world's world server takes them):
     # e.g. one GPU on a host whose other GPU is busy,
     # "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=1".
     app = SimulationApp({"headless": not args.display, "extra_args": ["--/crashreporter/url="]

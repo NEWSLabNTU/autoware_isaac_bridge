@@ -24,7 +24,7 @@ def element(colour):
 
 
 # A regulatory element whose lights disagree shows the most restrictive known colour (acb's
-# `group_colour`, swb_isaac_world's `signals.RESTRICTIVENESS`); OFF is "unknown", the least.
+# `group_colour`, scensim_isaac_world's `signals.RESTRICTIVENESS`); OFF is "unknown", the least.
 RESTRICTIVENESS = {"OFF": 0, "GREEN": 1, "AMBER": 2, "RED": 3}
 
 

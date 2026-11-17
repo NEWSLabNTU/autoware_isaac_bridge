@@ -37,12 +37,12 @@ itself. Every generated file names the spec's `spec_hash`.
 - **[scensim](https://github.com/NEWSLabNTU/scenario-world-bridge)**
   runs scenario_simulator_v2 scenarios on CARLA or Isaac Sim. Each simulator is a world
   server behind scensim's world protocol; the Isaac one,
-  [swb_isaac_world](https://github.com/NEWSLabNTU/swb_isaac_world), is a lockstep world
+  [scensim_isaac_world](https://github.com/NEWSLabNTU/swb_isaac_world), is a lockstep world
   (the world, the NPCs) whose ego is this library. It takes the ego's body for its spawn
   reply (box, wheels, `spec_hash`) from the rig.
 - Unlike acb, the bridge cannot be a separate ROS node: the sensors render in the process
   that steps the world, and that process runs Isaac Sim's own Python (3.12, its bundled
-  rclpy). So the library is imported by the host that owns the world -- swb_isaac_world, or
+  rclpy). So the library is imported by the host that owns the world -- scensim_isaac_world, or
   `aib.runner`.
 
 ## Quick start
@@ -111,7 +111,7 @@ part of a run computes from the same simulation time (scensim roadmap 051).
 There is no clock setting: the ego config's old `clock_offset` is gone, and a config naming
 it is refused at load. Time is monotonic within an episode only. A restarted runner or world
 server starts it again, and the profile's `clock_guard` then ends the Autoware stack, which
-comes back on the new episode. swb_isaac_world keeps its time running over its whole
+comes back on the new episode. scensim_isaac_world keeps its time running over its whole
 lifetime, so a world load there does not end an Isaac stack (on CARLA it does).
 
 ### Changing the vehicle
@@ -133,7 +133,7 @@ fail; a unit test checks the rig places the car and every sensor as Autoware's p
 - The pure library and the rig generator are tested here (`just test`).
   `isaac_simulator.launch.xml` is the profile acb's `carla_simulator.launch.xml` runs, without
   acb's bridge.
-- The Isaac code (`aib.isaac`, `aib.runner`) is the ego swb_isaac_world drives in scensim's Isaac
+- The Isaac code (`aib.isaac`, `aib.runner`) is the ego scensim_isaac_world drives in scensim's Isaac
   runs. The camera is untested on Isaac (off in the shipped rig, as on CARLA).
 - Powertrain: `ev`, the default (the Model 3 RWD drive unit: motor envelope and lag, regen
   blended with lagged friction brakes, ABS, traction control; road loads through the

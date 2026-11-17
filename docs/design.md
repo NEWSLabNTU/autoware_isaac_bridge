@@ -9,7 +9,7 @@ deps/sim_vehicle_spec/vehicles/<name>.yaml ──aib.gen──> src/aib/config/<
 
 Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (aib.isaac) in the
    aib_launch isaac_simulator.launch.xml   ── /control/command/* ──>   process stepping the world:
-   = autoware_sim_profile's                                              swb_isaac_world, or
+   = autoware_sim_profile's                                              scensim_isaac_world, or
      autoware.launch.xml, nothing added                                  aib.runner
      (tesla_model3, its sensor kit)
 ```
@@ -76,7 +76,7 @@ roadmaps 038 and 051):
   `now() - duration` goes negative. Time is monotonic within an episode only. A restarted
   runner or world server starts it again; a long-lived Autoware stack would clear its TF
   buffers and EKF for good, so it ends instead (autoware_sim_profile's `clock_guard`) and
-  comes back on the new episode. swb_isaac_world keeps its time running over its lifetime
+  comes back on the new episode. scensim_isaac_world keeps its time running over its lifetime
   (a world load starts a new `episode_id` but not a new time), so on Isaac a world load does
   not end the stack; on CARLA it does. (Until 051 a wall-clock offset, `clock_offset: wall`,
   hid a restart, and Isaac's time and SSv2's differed by it.)
@@ -253,9 +253,9 @@ a steering sweep against the bicycle model). PASS or FAIL, with `report.json`.
 `aib.runner` (`just isaac-ego`) is the smallest host: Isaac Sim, a world (a USD stage with
 its own colliders, or a ground plane), one ego at a pose, fixed frames forever. It is what
 acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs
-and no scenario protocol: those are swb_isaac_world's. A host that has signals hands them to
+and no scenario protocol: those are scensim_isaac_world's. A host that has signals hands them to
 `EgoRos.publish_signals` each frame, which publishes them to Autoware as acb does
-(swb_isaac_world sends SSv2's, scensim roadmap 044). The runner has none
+(scensim_isaac_world sends SSv2's, scensim roadmap 044). The runner has none
 commanded, so with `signals:=<map dir>` it runs CARLA's own cycle (`aib.signals.Cycle`): the
 lights of a junction, CARLA's light group, turn green one at a time, 10 s green and 3 s amber
 each (`green_s:=`, `amber_s:=`), the rest red, every group from sim time 0. The groups are

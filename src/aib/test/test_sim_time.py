@@ -4,7 +4,7 @@ import unittest
 __import__("_paths")  # sys.path, for direct runs
 from aib.sim_time import BASE_NS, nanos, sim_ns
 
-# swb_world_protocol's sim_time table (and acb's clock.rs), case for case.
+# scensim_world_protocol's sim_time table (and acb's clock.rs), case for case.
 NANOS_CASES = [
     (0.0, 0), (0.05000000074505806, 50_000_001), (5e-10, 1), (1.5e-9, 2), (2.5e-9, 3),
     (-2.5e-9, -3), (3.5e-9, 4), (0.10000000149011612, 100_000_001),
