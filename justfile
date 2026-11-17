@@ -78,7 +78,7 @@ test-isaac:
 check: test
     python3 -m pyflakes src/aib
 
-# Run one ego in an Isaac world, no swb/SSv2 (Isaac's Python). Settings as name:=value:
+# Run one ego in an Isaac world, no scensim/SSv2 (Isaac's Python). Settings as name:=value:
 #   ego:=<yaml>      ego config (default src/aib/config/ego.yaml)
 #   world:=<usd>     the stage to drive in, with its colliders; empty: a flat ground plane;
 #                    or a map's isaac/world.yaml: its usd, and the GNSS by the map's projector
@@ -158,7 +158,7 @@ vehicle-check *args:
         realtime:=true > "$out/runner.log" 2>&1 < /dev/null &
     runner=$!; groups+=($runner)
     # Autoware's setup.bash replaces CYCLONEDDS_URI when loopback multicast is on; keep the
-    # caller's, the Isaac ego's, or the check never discovers it (scenario-world-bridge issue 008).
+    # caller's, the Isaac ego's, or the check never discovers it (scensim issue 008).
     dds_uri="${CYCLONEDDS_URI:-}"
     source "{{autoware_setup}}"; source "{{project}}/install/setup.bash"
     if [ -n "$dds_uri" ]; then export CYCLONEDDS_URI="$dds_uri"; fi

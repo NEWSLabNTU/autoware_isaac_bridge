@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aib's stand-alone runner as a ROS executable: one ego in an Isaac world, no swb, no SSv2
+# aib's stand-alone runner as a ROS executable: one ego in an Isaac world, no scensim, no SSv2
 # (aib_launch isaac_vehicle.launch.xml; python -m aib.runner --help for the options).
 #
 #   aib_isaac_vehicle --ego <ego.yaml> [--world <world.yaml|usd>] [--map-pose x,y,z,yaw]

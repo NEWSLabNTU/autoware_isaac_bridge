@@ -5,7 +5,7 @@ sensors from (aib.rig).
     python -m aib.gen ... --check   # exit 1 when a rig is stale
     python -m aib.gen --spec <car.yaml> -o <car.rig.yaml> [--check]   # any spec, anywhere
 
-The last form is for a vehicle kept outside swb (a user's repository): the rig names its spec
+The last form is for a vehicle kept outside scensim (a user's repository): the rig names its spec
 by a path relative to the rig, which aib.rig resolves the same way.
 
 The spec is sim_vehicle_spec's (deps/sim_vehicle_spec, a submodule): one per car, the same one

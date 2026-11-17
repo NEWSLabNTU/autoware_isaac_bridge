@@ -1,4 +1,4 @@
-"""Simulation time as every part of a run computes it (scenario-world-bridge roadmap 051):
+"""Simulation time as every part of a run computes it (scensim roadmap 051):
 sim_ns = nanos(seconds) + BASE_NS, the world protocol's sim_time. Pure.
 
 BASE_NS keeps ROS time far from 0 (ROS's "no clock yet") and from the small values for which

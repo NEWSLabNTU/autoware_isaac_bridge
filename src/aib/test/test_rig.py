@@ -89,7 +89,7 @@ class RigTest(unittest.TestCase):
         cfg = EgoConfig.load(EGO.parent / "ego_drift_mustang.yaml")
         self.assertEqual(cfg.load_rig().name, "drift_mustang")
         self.assertEqual(cfg.control_topic, "/control/command/drift/control_cmd")
-        # the world waits for NDT's pose each frame (swb roadmap 057)
+        # the world waits for NDT's pose each frame (scensim roadmap 057)
         self.assertEqual(cfg.lockstep["topic"], "/localization/pose_estimator/pose_with_covariance")
 
     def test_clock_offset_is_refused_by_name(self):
@@ -179,7 +179,7 @@ class OutsideVehicleTest(unittest.TestCase):
 
 
 class GroundTruthConfigTest(unittest.TestCase):
-    """The ego config's ground_truth (swb roadmap 063 e): off by default, defaults filled."""
+    """The ego config's ground_truth (scensim roadmap 063 e): off by default, defaults filled."""
 
     def load(self, text):
         with tempfile.TemporaryDirectory() as tmp:

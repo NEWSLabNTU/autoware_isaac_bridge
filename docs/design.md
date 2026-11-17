@@ -15,7 +15,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 ```
 
 - **The spec** is the vehicle: one YAML per vehicle, sim_vehicle_spec's (roadmap 051 of
-  scenario-world-bridge; its `docs/spec-format.md`). The same spec gives Autoware's packages
+  scensim; its `docs/spec-format.md`). The same spec gives Autoware's packages
   (autoware_sim_vehicle), CARLA's files and the SSv2 catalog.
 - **The generator** (`aib.gen`) writes the rig, the one output that is aib's, and has a
   check mode that fails when it is stale. Autoware reads autoware_sim_vehicle's description
@@ -45,7 +45,7 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.isaac.vehicle` | Isaac | the PhysX vehicle ("drive none"): build, apply, sample, teleport |
 | `aib.isaac.sensors` | Isaac | RTX lidar, RGB camera, IMU, GNSS |
 | `aib.isaac.ego` | Isaac | `Ego`: one vehicle with its sensors and ROS side |
-| `aib.runner` | Isaac | one ego in a world, no swb, no SSv2 |
+| `aib.runner` | Isaac | one ego in a world, no scensim, no SSv2 |
 | `aib.steptest` | Isaac | open-loop step tests of the PhysX vehicle and its onboard computers, no ROS |
 
 The pure modules are what the unit tests cover, under the system Python (3.10) and Isaac's
@@ -66,7 +66,7 @@ stamp = ros.publish_clock(t_end)    # once per frame, by the host
 ego.publish(t_end, stamp)           # vehicle status, IMU, GNSS (at its rate), lidar (one frame late)
 ```
 
-Lockstep, as acb follows CARLA's ticks. Two choices, with why (scenario-world-bridge
+Lockstep, as acb follows CARLA's ticks. Two choices, with why (scensim
 roadmaps 038 and 051):
 
 - **`/clock`**: stamps are `sim_ns(t) = nanos(t) + BASE_NS` (`aib.sim_time`: `BASE_NS` is
@@ -84,7 +84,7 @@ roadmaps 038 and 051):
   of that stamp to NDT, which then cannot interpolate and flaps MRM.
 - **The lidar stamped at its render**: the RTX annotator's data is two renders old when read
   (`isaac.latency_frames`, default 2), so a scan takes the stamp of the frame it was rendered
-  in; stamped when read it lagged the car by 0.13 s, 2.6 m at 20 m/s (swb docs/issues/015).
+  in; stamped when read it lagged the car by 0.13 s, 2.6 m at 20 m/s (scensim docs/issues/015).
 
 `EgoRos` is made once per process and kept across egos (a new DDS participant among ~200
 Autoware ones takes seconds to be discovered).
@@ -99,7 +99,7 @@ is placed so that the sagged wheel centre is at `z = r`. The chassis collider is
 lifted clear of the ground so only the wheels touch it.
 
 The physics numbers, their sources and which are assumptions are in the spec; the first
-spec is the "plausible real Model 3" of scenario-world-bridge roadmap 043 ("As built:
+spec is the "plausible real Model 3" of scensim roadmap 043 ("As built:
 vehicle").
 
 ## The onboard computers
@@ -107,7 +107,7 @@ vehicle").
 Between the vehicle interface and the wheels sit the car's onboard computers: the drive
 unit's controller, the brake module (brake distribution, ABS, traction control, ESC) and the
 power steering, with the actuators PhysX's drive-none vehicle lacks. Since
-scenario-world-bridge roadmap 055 they are not aib's: they are
+scensim roadmap 055 they are not aib's: they are
 [sim_vehicle_ecu](https://github.com/NEWSLabNTU/sim_vehicle_ecu) (`deps/sim_vehicle_ecu`),
 which knows no simulator and no ROS. `Vehicle.apply` steps its `Ecu` every physics step (1/60
 s; PhysX substeps the vehicle 8 times inside each) with Autoware's latest command as the
@@ -188,7 +188,7 @@ from published data, with their sources and which are estimates in the spec's pr
 
 `just isaac-steptest` (`aib.steptest`) builds the rig's vehicle in Isaac on a flat ground
 plane, no ROS, and runs open-loop tests (0-100 km/h, 100-0 braking, regen at 60 km/h,
-acceleration and braking steps, scenario-world-bridge roadmap 043's step-response sequences), writing a CSV per test
+acceleration and braking steps, scensim roadmap 043's step-response sequences), writing a CSV per test
 and `summary.json` (`set:=field=value` overrides, repeatable). The shipped spec, measured
 2026-10-19 (flat ground, friction 1.0; "flat" is the earlier flat grip curve, "realistic"
 the spec's grip falling to 0.8 at lock):
@@ -227,7 +227,7 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),
-so Autoware's sensing launch and swb's runs see what they see on CARLA. The IMU and
+so Autoware's sensing launch and scensim's runs see what they see on CARLA. The IMU and
 GNSS frames were `carla/imu_link` and `carla/gnss_link` until 2026-10-19; they carry no
 simulator name now, on either bridge. The camera publishes in `camera6/camera_optical_link` (acb publishes in
 `camera6/camera_link`).
@@ -255,12 +255,12 @@ its own colliders, or a ground plane), one ego at a pose, fixed frames forever. 
 acb's standalone mode is to acb: Autoware drives a car with no scenario around it. No NPCs
 and no scenario protocol: those are swb_isaac_world's. A host that has signals hands them to
 `EgoRos.publish_signals` each frame, which publishes them to Autoware as acb does
-(swb_isaac_world sends SSv2's, scenario-world-bridge roadmap 044). The runner has none
+(swb_isaac_world sends SSv2's, scensim roadmap 044). The runner has none
 commanded, so with `signals:=<map dir>` it runs CARLA's own cycle (`aib.signals.Cycle`): the
 lights of a junction, CARLA's light group, turn green one at a time, 10 s green and 3 s amber
 each (`green_s:=`, `amber_s:=`), the rest red, every group from sim time 0. The groups are
 CARLA's, written once per town into `<map dir>/carla/signal_groups.yaml` by
-scenario-world-bridge's `scripts/generate_signal_groups.py` (CARLA holding the town); which
+scensim's `scripts/generate_signal_groups.py` (CARLA holding the town); which
 regulatory elements a light is comes from the map's signal table, as for acb. Only the V2X
 input moves: a world's lamp prims stay as they are. Without `signals:=`, nothing publishes,
 and Autoware stops at every signalised stop line with its light unknown.

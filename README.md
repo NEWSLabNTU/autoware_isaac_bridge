@@ -25,7 +25,7 @@ itself. Every generated file names the spec's `spec_hash`.
 | `src/aib/config/` | `tesla_model3.rig.yaml`, the Isaac rig (generated from the spec: do not edit), and `ego.yaml`, an ego run of it (the rig, the ROS domain, the node name, hand overrides) |
 | `src/aib_launch/` | `isaac_simulator.launch.xml`: Autoware for the Isaac ego. It is autoware_sim_vehicle's profile with nothing added (`vehicle_model:=tesla_model3`, `sensor_model:=tesla_model3_sensor_kit`) |
 
-### How it relates to acb and swb
+### How it relates to acb and scensim
 
 - **acb** is the same thing on CARLA: CARLA owns the car, acb_bridge (Rust) publishes its
   sensors and status and applies Autoware's control. aib is the Isaac side's equivalent.
@@ -34,9 +34,9 @@ itself. Every generated file names the spec's `spec_hash`.
   car's packages: acb's `carla_simulator.launch.xml` is the profile plus `acb_bridge`, aib's
   `isaac_simulator.launch.xml` is the profile with nothing added. Topic names and frames are
   the same, so the same Autoware pipeline consumes them.
-- **[scenario-world-bridge](https://github.com/NEWSLabNTU/scenario-world-bridge)** (swb)
+- **[scensim](https://github.com/NEWSLabNTU/scenario-world-bridge)**
   runs scenario_simulator_v2 scenarios on CARLA or Isaac Sim. Each simulator is a world
-  server behind swb's world protocol; the Isaac one,
+  server behind scensim's world protocol; the Isaac one,
   [swb_isaac_world](https://github.com/NEWSLabNTU/swb_isaac_world), is a lockstep world
   (the world, the NPCs) whose ego is this library. It takes the ego's body for its spawn
   reply (box, wheels, `spec_hash`) from the rig.
@@ -80,7 +80,7 @@ vehicle and sensors but not to localize against a map. `isaac-ego` also takes `e
 scenario, so the runner cycles them as CARLA does, a junction's lights green in turn (10 s
 green, 3 s amber: `green_s:=`, `amber_s:=`), and publishes them to Autoware over V2X. It needs
 CARLA's light groups in `<map dir>/carla/signal_groups.yaml`, written once per town from
-CARLA holding it by scenario-world-bridge's `scripts/generate_signal_groups.py <Town> --map
+CARLA holding it by scensim's `scripts/generate_signal_groups.py <Town> --map
 <map dir> --port <CARLA port>`. Without `signals:=` Autoware stops at every signalised stop
 line, its light unknown (docs/design.md, Standalone runner).
 
@@ -107,7 +107,7 @@ only on PASS.
 
 The ego stamps `/clock` and every message with `sim_ns = nanos(sim seconds) + BASE_NS`
 (`aib.sim_time`; `BASE_NS` is 1000 s, `nanos` rounds half away from zero), the integer every
-part of a run computes from the same simulation time (scenario-world-bridge roadmap 051).
+part of a run computes from the same simulation time (scensim roadmap 051).
 There is no clock setting: the ego config's old `clock_offset` is gone, and a config naming
 it is refused at load. Time is monotonic within an episode only. A restarted runner or world
 server starts it again, and the profile's `clock_guard` then ends the Autoware stack, which
@@ -133,7 +133,7 @@ fail; a unit test checks the rig places the car and every sensor as Autoware's p
 - The pure library and the rig generator are tested here (`just test`).
   `isaac_simulator.launch.xml` is the profile acb's `carla_simulator.launch.xml` runs, without
   acb's bridge.
-- The Isaac code (`aib.isaac`, `aib.runner`) is the ego swb_isaac_world drives in swb's Isaac
+- The Isaac code (`aib.isaac`, `aib.runner`) is the ego swb_isaac_world drives in scensim's Isaac
   runs. The camera is untested on Isaac (off in the shipped rig, as on CARLA).
 - Powertrain: `ev`, the default (the Model 3 RWD drive unit: motor envelope and lag, regen
   blended with lagged friction brakes, ABS, traction control; road loads through the

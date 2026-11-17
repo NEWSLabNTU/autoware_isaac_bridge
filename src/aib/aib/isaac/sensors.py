@@ -55,19 +55,19 @@ def _pose_after(vehicle, state, dt):
 class Lidar:
     """An RTX lidar. Its data is `latency` frames old when read (the annotator's: two renders,
     the rig's `isaac.latency_frames`), so a scan takes the stamp of the frame it was rendered in,
-    not the one it is read in (swb docs/issues/015: 0.13 s of lag, 2.6 m at 20 m/s). It goes out
+    not the one it is read in (scensim docs/issues/015: 0.13 s of lag, 2.6 m at 20 m/s). It goes out
     one frame late with that stamp: sent in the same
     instant as `/clock` of its own frame, a scan races the EKF pose of that stamp to
     ndt_scan_matcher, whose pose buffer then cannot interpolate ("Couldn't interpolate
-    pose" -> localization not OK -> MRM for a cycle, swb roadmap 038). On CARLA the scan
+    pose" -> localization not OK -> MRM for a cycle, scensim roadmap 038). On CARLA the scan
     arrives after the tick's /clock; on a vehicle, 50-100 ms after capture.
 
     The lidar is not under its vehicle. Isaac never gives back what an RTX lidar's render
     product cost (~105 MB): not destroyed, not paused, not pointed at a lidar at a new path
-    (swb docs/issues/003); and pointing a kept product at a new lidar prim at the old path,
-    which does give it back, once hung swb's world server's renderer. So a lidar prim and its
+    (scensim docs/issues/003); and pointing a kept product at a new lidar prim at the old path,
+    which does give it back, once hung scensim's world server's renderer. So a lidar prim and its
     render product are made once per vehicle path and sensor, under `SENSORS`, and kept for
-    the next vehicle at that path (swb's world server spawns its egos at the same paths).
+    the next vehicle at that path (scensim's world server spawns its egos at the same paths).
     Before each substep the host calls `before_substep`, which puts the lidar where its mount
     will be after that substep.
 
@@ -225,11 +225,11 @@ class Lidar:
 
 class Camera:
     """A pinhole RGB camera: Image (rgb8) and CameraInfo at the rig's rate. Not exercised
-    by swb's runs yet (its traffic lights reach Autoware by V2X): off in the shipped rig.
+    by scensim's runs yet (its traffic lights reach Autoware by V2X): off in the shipped rig.
 
     `auto_exposure: true` (the rig's, or an ego config's override) gives it RTX's auto-exposure,
     as a real camera has: without it a fixed exposure leaves the shade under trees nearly
-    black next to a sunlit road (swb roadmap 059). On Isaac 6.1 that is the camera prim's
+    black next to a sunlit road (scensim roadmap 059). On Isaac 6.1 that is the camera prim's
     OmniRtxCameraAutoExposureAPI_1, not the global /rtx/post/histogram setting."""
 
     renders = True

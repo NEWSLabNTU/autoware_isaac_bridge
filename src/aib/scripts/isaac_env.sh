@@ -3,7 +3,7 @@
 # RMW_IMPLEMENTATION and CYCLONEDDS_URI pass through, so the stack's DDS settings apply.
 # ISAAC_ROOT has no default (csb roadmap 077 G75): the install is wherever a host put it.
 if [ -z "${ISAAC_ROOT:-}" ]; then
-    echo "isaac_env.sh: ISAAC_ROOT is not set: it names Isaac Sim 6.1's pip install; set it (swb: isaac.root in ~/.config/swb/host.yaml)" >&2
+    echo "isaac_env.sh: ISAAC_ROOT is not set: it names Isaac Sim 6.1's pip install; set it (scensim: isaac.root in ~/.config/scensim/host.yaml)" >&2
     return 2 2>/dev/null || exit 2
 fi
 I=$ISAAC_ROOT

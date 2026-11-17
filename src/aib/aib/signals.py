@@ -1,6 +1,6 @@
-"""Traffic signals as Autoware's V2X input (scenario-world-bridge roadmap 044).
+"""Traffic signals as Autoware's V2X input (scensim roadmap 044).
 
-The host (swb's world server) holds each signal's colour, as SSv2 commands it; `EgoRos`
+The host (scensim's world server) holds each signal's colour, as SSv2 commands it; `EgoRos`
 publishes them on `/perception/traffic_light_recognition/external/traffic_signals`, the
 input `traffic_light_arbiter` takes beside its own recognition, as acb does on CARLA: one
 `TrafficLightGroup` per Lanelet2 regulatory element, one solid circle at confidence 1 (the
@@ -34,7 +34,7 @@ class Cycle:
     CARLA turns a junction's lights green one at a time: each green for `green_s`, then amber
     for `amber_s`, while the rest of its group is red (10 s and 3 s are CARLA's defaults).
     The groups come from the map dir's `carla/signal_groups.yaml`
-    (scenario-world-bridge's `scripts/generate_signal_groups.py`, from CARLA's own groups);
+    (scensim's `scripts/generate_signal_groups.py`, from CARLA's own groups);
     which regulatory elements each light is, from its signal table (`traffic_lights.yaml`).
     Every group starts its cycle at sim time 0."""
 
@@ -67,7 +67,7 @@ class Cycle:
         if not groups_file.exists():
             raise FileNotFoundError(
                 f"no {groups_file}: write it from CARLA holding the town, with "
-                "scenario-world-bridge's scripts/generate_signal_groups.py <Town> --map "
+                "scensim's scripts/generate_signal_groups.py <Town> --map "
                 f"{d} --port <CARLA port>")
         elements = {}
         for s in (yaml.safe_load(table.read_text()) or {}).get("signals", []):

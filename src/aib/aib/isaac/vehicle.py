@@ -18,9 +18,9 @@ force, contact) are read back for the sensors and the host's surface layer.
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
 rig's `tire_friction` until a host writes another (`set_wheel_friction`). A host with a
-surface map (swb's surface layer, roadmap 047) writes it every substep from the wheel's
+surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
 ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
-inputs of swb's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
+inputs of scensim's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
 host's to apply through the same friction value. The tire's stiffness, sideways and
 lengthways, does take while playing (054 step 1): a host scales it per wheel
@@ -211,7 +211,7 @@ class Vehicle:
             comp.CreateWheelCamberAngleAttr([])
             # The suspension pushes at the wheel's centre; the tire at its contact patch, the
             # ground under it, so its force pitches and rolls the body about the CoM's whole
-            # height as a real tyre's does (at the centre: a third of the load transfer, swb
+            # height as a real tyre's does (at the centre: a third of the load transfer, scensim
             # issue 023).
             comp.CreateSuspensionForceAppPointAttr([Gf.Vec4f(0.0, 0.0, 0.0, r - frame_z)])
             comp.CreateTireForceAppPointAttr([Gf.Vec4f(0.0, 0.0, 0.0, -frame_z)])

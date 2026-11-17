@@ -1,9 +1,9 @@
 """A vehicle body on the stand-alone runner's ego: render only, physics stays the box.
 
 `aib.runner` puts the PhysX vehicle on the stage with a box chassis and cylinder wheels. An ego
-config's `body:` names a vehicle catalogue entry (the `vehicles.json` entry format of swb's
+config's `body:` names a vehicle catalogue entry (the `vehicles.json` entry format of scensim's
 Isaac vehicle catalogue, `swb_isaac_world.vehicle_assets`; for one car its `entry.json`), and
-this puts that body on it the way swb's world server dresses its egos:
+this puts that body on it the way scensim's world server dresses its egos:
 - the body's rear axle sits on base_link;
 - the body's own wheels are switched off, and each wheel model goes on the PhysX wheel prim of
   its corner, so that it steers and spins;

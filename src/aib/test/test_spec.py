@@ -25,7 +25,7 @@ class ShippedSpecTest(unittest.TestCase):
     def setUp(self):
         self.spec = specmod.load(SPEC)
 
-    def test_it_is_swbs_model3_as_the_rwd(self):
+    def test_it_is_scensims_model3_as_the_rwd(self):
         # swb 4aefee8's vehicle_params.py (the plausible real Model 3), with the RWD's mass,
         # weight split and drive unit
         p = vehicle_params(self.spec)

@@ -55,7 +55,7 @@ class ImuTest(unittest.TestCase):
         self.assertTrue(close(gyro, (0.0, 0.0, 0.0)))
 
     def test_a_flipped_mount_flips_the_reading(self):
-        # swb's (CARLA's) IMU mount: roll pi, yaw pi
+        # scensim's (CARLA's) IMU mount: roll pi, yaw pi
         q_bi = frames.rpy_quat(math.pi, 0.0, math.pi)
         s = State(acceleration=(1.0, 0.0, 0.0), angular_velocity=(0.0, 0.0, 0.2))
         _, gyro, acc = imu_reading(s, q_bi)
@@ -82,7 +82,7 @@ class GnssTest(unittest.TestCase):
 
     def test_mgrs_projector_matches_the_maps_own_lat_lon(self):
         # node 1 of the NTU r02 Lanelet2 map, as its MGRS 51RUH tooling wrote it; the world is
-        # the map less map_origin (scenario-world-bridge roadmap 059)
+        # the map less map_origin (scensim roadmap 059)
         p = frames.Projector((52_500.0, 67_700.0, 0.0), "51RUH")
         lat, lon, alt = p.lat_lon_alt(52217.4936 - 52_500.0, 67651.6452 - 67_700.0, 11.8783)
         north = (lat - 25.01720437293) * 111_320.0
@@ -120,7 +120,7 @@ class GnssTest(unittest.TestCase):
         self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
 
     def test_transverse_mercator_at_zero_is_the_old_frame(self):
-        # what download_maps.sh writes for CARLA's towns (swb 063: aib refused it, so no
+        # what download_maps.sh writes for CARLA's towns (scensim roadmap 063: aib refused it, so no
         # Isaac run on such a map started)
         import tempfile, os
         with tempfile.TemporaryDirectory() as d:
@@ -198,7 +198,8 @@ class MiscTest(unittest.TestCase):
 
 
 class GroundTruthTest(unittest.TestCase):
-    """base_link in the map frame for the recordings and the drive on ground truth (swb 063 e)."""
+    """base_link in the map frame, for the recordings and the drive on ground truth
+    (scensim roadmap 063 e)."""
 
     def test_the_map_is_the_world_plus_its_origin(self):
         st = State()

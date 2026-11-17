@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-  One ego in an Isaac Sim world, stand-alone (aib's runner; no swb, no SSv2): the world, the
+  One ego in an Isaac Sim world, stand-alone (aib's runner; no scensim, no SSv2): the world, the
   vehicle and its sensors, its vehicle interface and /clock on the ego config's ROS domain.
   Autoware on that domain drives it (isaac_simulator.launch.xml, or a vehicle's own stack).
 

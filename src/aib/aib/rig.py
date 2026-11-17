@@ -8,7 +8,7 @@ loads the spec it names (relative to the rig, else under `deps/`; or absolute) f
 config (`config/ego.yaml`) is a run of it: which rig, the ROS domain, and hand overrides of
 the PhysX vehicle, the calibration and the sensors, applied last.
 
-A vehicle may live outside swb: an ego config, its rig, the rig's spec, its body and its
+A vehicle may live outside scensim: an ego config, its rig, the rig's spec, its body and its
 sensors' USD profiles name each other by paths relative to the file that names them, so a
 user's repository keeps them side by side (docs/vehicle-from-another-repository.md).
 """
@@ -125,7 +125,7 @@ def _resolve(base, p):
 
 def spec_path(rig_path, spec):
     """The file of the spec a rig names: absolute; relative to the rig (a vehicle kept in
-    another repository, `aib.gen --spec`); else relative to `deps/` (swb's own specs)."""
+    another repository, `aib.gen --spec`); else relative to `deps/` (scensim's own specs)."""
     p = Path(_resolve(Path(rig_path).parent, spec))
     return p if p.is_file() else DEPS / spec
 
@@ -154,7 +154,7 @@ GROUND_TRUTH_DEFAULTS = {"topic": "/ground_truth/odom", "pose_estimate": False,
 
 @dataclass
 class EgoConfig:
-    """A run of a rig: what swb's `acb_ego.yaml` held, minus the vehicle itself."""
+    """A run of a rig: what scensim's `acb_ego.yaml` held, minus the vehicle itself."""
 
     rig: str = ""  # path, relative to this file
     # ROS domain of the ego's nodes; None (the key left out): ROS_DOMAIN_ID, else 0
@@ -164,18 +164,18 @@ class EgoConfig:
     ecu: dict = field(default_factory=dict)  # sim_vehicle_ecu.Calibration overrides, by name
     sensors: dict = field(default_factory=dict)  # sensor name -> overrides (SENSOR_OVERRIDES)
     # Where the vehicle takes Autoware's Control from. Another topic puts a node between
-    # Autoware's command gate and the car (autoware-drift's drift_controller, swb roadmap 057).
+    # Autoware's command gate and the car (autoware-drift's drift_controller, scensim roadmap 057).
     control_topic: str = "/control/command/control_cmd"
-    # The world waits for the ego's localizer before each frame (swb roadmap 057; aib.ros):
+    # The world waits for the ego's localizer before each frame (scensim roadmap 057; aib.ros):
     # {} off; {topic, timeout_s, max_misses} on, each defaulting to aib.ros.LOCKSTEP_DEFAULTS
     # (Autoware's NDT pose, 1 s, 3).
     lockstep: dict = field(default_factory=dict)
-    # base_link's ground truth every frame (swb roadmap 063 e): {} off; on, each key defaulting
+    # base_link's ground truth every frame (scensim roadmap 063 e): {} off; on, each key defaulting
     # to GROUND_TRUTH_DEFAULTS: Odometry in the map frame on `topic`, and with `pose_estimate`
     # the same pose as NDT's PoseWithCovarianceStamped (POSE_ESTIMATE_TOPIC, `covariance`:
     # position m^2, angle rad^2), so Autoware under the profile's ndt:=none drives on it.
     ground_truth: dict = field(default_factory=dict)
-    # The ego's body (aib.isaac.body; swb's Isaac world server too): a vehicle catalogue entry
+    # The ego's body (aib.isaac.body; scensim's Isaac world server too): a vehicle catalogue entry
     # (a car's entry.json), relative to this file; empty: the box and cylinders show.
     body: str = ""
 
@@ -186,7 +186,7 @@ class EgoConfig:
         path = Path(path)
         doc = yaml.safe_load(path.read_text()) or {}
         if "clock_offset" in doc:
-            raise ValueError(f"{path}: clock_offset is gone (scenario-world-bridge roadmap 051): "
+            raise ValueError(f"{path}: clock_offset is gone (scensim roadmap 051): "
                              "the ego stamps sim time + BASE_NS, and a stack that sees time go "
                              "back ends; remove the key")
         unknown = set(doc) - {f.name for f in fields(cls)}

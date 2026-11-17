@@ -1,7 +1,7 @@
 # A vehicle from another repository
 
 aib builds an ego from files that name each other. None of them has to live in aib: a
-repository that uses swb can keep its own car next to its own Autoware, and aib reads it from
+repository that uses scensim can keep its own car next to its own Autoware, and aib reads it from
 there. Every path below is relative to the file that names it, unless it is absolute;
 environment variables in a path expand.
 
@@ -24,7 +24,7 @@ environment variables in a path expand.
   python3 -m aib.gen --spec vehicle/<car>.yaml -o isaac/<car>.rig.yaml
   python3 -m aib.gen --spec vehicle/<car>.yaml -o isaac/<car>.rig.yaml --check   # in CI
   ```
-  Run it with aib on `PYTHONPATH` (`src/aib` of an aib checkout, or a sourced swb install).
+  Run it with aib on `PYTHONPATH` (`src/aib` of an aib checkout, or a sourced scensim install).
   The rig's `spec:` is the spec's path relative to the rig. Loading the rig refuses a spec
   whose `spec_hash` is not the one the rig was generated from: regenerate after every change
   to the spec. A sensor's `isaac.usd` (an RTX lidar profile of your own) is relative to the
@@ -60,6 +60,6 @@ ego config (`ecu: {brake_floor: <N m>}`): the default, 50 N m, is a road car's, 
 lighter brake request under it is dropped. AutoSDV's car A twin (a 5 kg 1/10 car) is the
 worked example: `src/simulation/autosdv_twin` in NEWSLabNTU/AutoSDV.
 
-Under SSv2 (swb's Isaac world server): its `ego_config` launch argument takes the same ego
+Under SSv2 (scensim's Isaac world server): its `ego_config` launch argument takes the same ego
 config. The bridge's spec check then also needs the car's SSv2 catalog entry and the vehicle
-agent's spec_hash; scenario-world-bridge's `docs/design/vehicle-side.md` lists those slots.
+agent's spec_hash; scensim's `docs/design/vehicle-side.md` lists those slots.

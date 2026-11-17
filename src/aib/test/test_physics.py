@@ -1,5 +1,5 @@
 """Vehicle parameters, the road load and the steering linkage: the maths the PhysX vehicle
-applies every substep. Pure. Ported from swb's test_vehicle_params.py where it applies. The
+applies every substep. Pure. Ported from scensim's test_vehicle_params.py where it applies. The
 onboard computers' (powertrain, brakes, steering actuator) are tested in sim_vehicle_ecu."""
 import math
 import unittest

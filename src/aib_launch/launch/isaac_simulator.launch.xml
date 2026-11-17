@@ -3,7 +3,7 @@
 
      The Autoware side of an aib ego: the Autoware profile for a simulated car
      (autoware_sim_profile, from autoware_sim_vehicle) with aib's vehicle and sensor kit, and no
-     vehicle interface of its own: the Isaac side (aib's runner, or scenario-world-bridge's
+     vehicle interface of its own: the Isaac side (aib's runner, or scensim's
      Isaac world server) publishes /vehicle/status/*, /clock and the sensors on this domain
      and takes /control/command/*.
 

@@ -14,7 +14,7 @@ episode, and the Autoware profile's `clock_guard` ends the stack if it ever goes
 | the rig's camera topics (when enabled) | Image, CameraInfo | the sensor's |
 | `/vehicle/status/{velocity,steering,gear,control_mode,turn_indicators,hazard_lights}_status` | Autoware | `base_link` |
 | `/clock` | Clock | |
-| `ground_truth.topic` (the ego config's, when on; swb roadmap 063) | Odometry, base_link in the map | `map` -> `base_link` |
+| `ground_truth.topic` (the ego config's, when on; scensim roadmap 063) | Odometry, base_link in the map | `map` -> `base_link` |
 | NDT's pose topic (with `ground_truth.pose_estimate`) | PoseWithCovarianceStamped, the same pose | `map` |
 | `/perception/traffic_light_recognition/external/traffic_signals` (when the host has signals) | TrafficLightGroupArray | |
 
@@ -22,7 +22,7 @@ Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_
 Control from the ego config's `control_topic`, by default `/control/command/control_cmd`) and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
 
-With `lockstep` (the ego config's; swb roadmap 057) the world waits for the ego's localizer:
+With `lockstep` (the ego config's; scensim roadmap 057) the world waits for the ego's localizer:
 before a frame takes its commands, `take_commands` blocks until the localizer has published a
 pose for the last lidar scan sent (a `PoseWithCovarianceStamped` on `lockstep.topic` stamped at
 the scan, as Autoware's NDT stamps its pose), at most `lockstep.timeout_s`. The simulation then
@@ -31,12 +31,12 @@ speed; on a busy host it slows instead of the localizer skipping scans. The wait
 localizer's first pose (no waiting before it localizes) and disarms after `max_misses` waits
 in a row time out (a localizer that stopped), until the next pose.
 
-Stamps are sim time plus BASE_NS (aib.sim_time; scenario-world-bridge roadmap 051): the
+Stamps are sim time plus BASE_NS (aib.sim_time; scensim roadmap 051): the
 integer every part of a run computes from the same time, clear of zero, where Autoware
 misbehaves. Time is monotonic within an episode only; a stack that sees `/clock` go back (a
 restarted runner or world server) ends (autoware_sim_profile's clock_guard) and comes back on
 the new episode, rather than living on with cleared TF buffers and an EKF that never drives
-again (swb roadmap 038).
+again (scensim roadmap 038).
 
 Runs inside Isaac Sim's Python (3.12, its bundled rclpy) with Autoware's message packages
 rebuilt for it (scripts/build_msgs.sh); nothing here is imported by the pure modules.
