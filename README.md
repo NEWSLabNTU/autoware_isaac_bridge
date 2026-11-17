@@ -34,10 +34,10 @@ itself. Every generated file names the spec's `spec_hash`.
   car's packages: acb's `carla_simulator.launch.xml` is the profile plus `acb_bridge`, aib's
   `isaac_simulator.launch.xml` is the profile with nothing added. Topic names and frames are
   the same, so the same Autoware pipeline consumes them.
-- **[scensim](https://github.com/NEWSLabNTU/scenario-world-bridge)**
+- **[scensim](https://github.com/NEWSLabNTU/scensim)**
   runs scenario_simulator_v2 scenarios on CARLA or Isaac Sim. Each simulator is a world
   server behind scensim's world protocol; the Isaac one,
-  [scensim_isaac_world](https://github.com/NEWSLabNTU/swb_isaac_world), is a lockstep world
+  [scensim_isaac_world](https://github.com/NEWSLabNTU/scensim_isaac_world), is a lockstep world
   (the world, the NPCs) whose ego is this library. It takes the ego's body for its spawn
   reply (box, wheels, `spec_hash`) from the rig.
 - Unlike acb, the bridge cannot be a separate ROS node: the sensors render in the process
