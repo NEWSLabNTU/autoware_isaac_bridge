@@ -88,10 +88,29 @@ def test_rings_count_from_the_lowest_whatever_the_scan_has():
     assert list(lp.rings([-25.0, 0.0], P)) == [0, round(25 / step)]
 
 
-def test_the_first_scan_is_checked_against_the_profile():
+def test_a_scan_on_the_profiles_rings_passes():
     rings = np.array(lp.elevations(P))
-    assert lp.check(np.repeat(rings[60:], 3), P) is None
-    os1 = np.linspace(20.93, -21.48, 128)                     # the stock OS1's rings
-    assert "off the profile's rings" in lp.check(os1, P) or "lowest point" in lp.check(os1, P)
-    assert "lowest point" in lp.check(rings[:100], P)         # nothing below -12 deg
+    assert lp.check(np.repeat(rings, 3), P) is None
+    assert lp.check(rings[rings < 2.0], P) is None            # upper rings in the sky
+    assert lp.check(rings + 0.05, P) is None                   # a little pitch in the sweep
     assert lp.check([], P) == "no points"
+
+
+def test_a_sparser_pattern_over_the_same_field_fails_off_the_rings():
+    e = np.linspace(15.0, -25.0, 64)
+    assert "off the profile's rings" in lp.check(e, P)
+
+
+def test_a_sparser_pattern_on_alternate_rings_fails_on_coverage():
+    rings = np.array(lp.elevations(P))
+    assert "rings at or below -1 deg have a point" in lp.check(rings[::2], P)
+
+
+def test_the_stock_os1_fails_off_the_rings():
+    os1 = np.linspace(20.93, -21.48, 128)                     # 0.34 deg apart, +-21 deg
+    assert "off the profile's rings" in lp.check(os1, P)
+
+
+def test_a_scan_missing_its_lowest_rings_fails_on_coverage():
+    rings = np.array(lp.elevations(P))
+    assert "rings at or below -1 deg have a point" in lp.check(rings[rings > -21.5], P)

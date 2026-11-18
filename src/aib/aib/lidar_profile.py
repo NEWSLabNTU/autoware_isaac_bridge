@@ -10,6 +10,10 @@ spec lidar gave ~20 % fewer points on Isaac than on CARLA (084: 88.7k against 11
 .carla_attributes) and returns the rig's profile; `attributes(profile)` the OmniLidar prim's
 `omni:sensor:Core:*` values that make Isaac fire the same pattern. Pure functions; the Isaac
 side is aib.isaac.sensors.Lidar, which sets them on the prim before its render product.
+
+Two ring orders: the profile's (`elevations`, OmniLidar's `channelId`) counts from the highest
+ring, as CARLA fires them; the published PointCloud2's `channel` (`rings`) counts from the
+lowest, 0 the lowest ring, as aib numbers every lidar's.
 """
 
 import numpy as np
@@ -64,6 +68,9 @@ def attributes(p):
         STATE + "elevationDeg": elevations(p),
         STATE + "azimuthDeg": zeros,
         STATE + "channelId": list(range(1, n + 1)),
+        # spread over one column, as a real sensor fires its rings: up to one column (0.35 deg
+        # at 1024) of azimuth between the first ring and the last, where CARLA fires a column
+        # at one instant
         STATE + "fireTimeNs": [int(i * period_ns / n) for i in range(n)],
         STATE + "distanceCorrectionM": zeros,
         STATE + "focalDistM": zeros,
@@ -83,19 +90,32 @@ def rings(elevation_deg, p):
     return np.clip(r, 0, p["channels"] - 1).astype(np.uint16)
 
 
-def check(elevation_deg, p, tol=0.2):
-    """None when a scan's elevations (degrees) are the profile's rings, else what is wrong:
-    every point within `tol` of a ring, and the lowest ring hit (the ground is always there)."""
+def check(elevation_deg, p, tol=None):
+    """None when a scan's elevations (degrees) are the profile's rings, else what is wrong.
+    Two tests, each enough alone to catch a stock profile left in place:
+    - on the rings: 99 % of points within `tol` of a ring (default a quarter of the spacing;
+      a still scan measured 1e-5 deg, 084b), and none beyond the field of view;
+    - every ring: 90 % of the rings at or below -1 deg have a point. Those meet flat ground
+      within ~115 m of a sensor 2 m up; the rings above may see only sky."""
     e = np.asarray(elevation_deg, dtype=np.float64).reshape(-1)
     if len(e) == 0:
         return "no points"
     step = (p["upper_fov"] - p["lower_fov"]) / (p["channels"] - 1)
-    off = np.abs((e - p["lower_fov"]) / step - np.rint((e - p["lower_fov"]) / step)) * step
+    tol = step / 4 if tol is None else tol
+    idx = (e - p["lower_fov"]) / step
+    off = np.abs(idx - np.rint(idx)) * step
     bad = (off > tol) | (e < p["lower_fov"] - tol) | (e > p["upper_fov"] + tol)
     if bad.mean() > 0.01:
-        return (f"{100 * bad.mean():.1f} % of points off the profile's rings "
-                f"(elevations {e.min():.2f}..{e.max():.2f} deg, rings every {step:.3f} deg "
-                f"from {p['lower_fov']:g} to {p['upper_fov']:g})")
-    if e.min() > p["lower_fov"] + tol:
-        return f"lowest point at {e.min():.2f} deg, the profile's lowest ring {p['lower_fov']:g}"
+        return (f"{100 * bad.mean():.1f} % of points off the profile's rings by more than "
+                f"{tol:.3f} deg (elevations {e.min():.2f}..{e.max():.2f} deg; rings every "
+                f"{step:.3f} deg from {p['lower_fov']:g} to {p['upper_fov']:g})")
+    rings = np.array(elevations(p))
+    low = np.flatnonzero(rings <= -1.0)
+    hit = np.zeros(p["channels"], bool)
+    hit[np.clip(np.rint(idx[~bad]).astype(int), 0, p["channels"] - 1)] = True
+    # idx counts from the lowest ring; elevations() from the highest
+    low_hit = hit[p["channels"] - 1 - low]
+    if len(low) and low_hit.mean() < 0.9:
+        return (f"only {low_hit.sum()} of the {len(low)} rings at or below -1 deg have a point "
+                f"(the lowest point at {e.min():.2f} deg)")
     return None
