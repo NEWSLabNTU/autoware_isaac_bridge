@@ -223,15 +223,7 @@ class Lidar:
                                      [c for _, _, c in tr])
         inten = info.get("intensity")
         if self.table is not None:
-            import time
-            t0 = time.perf_counter()
             spec_inten = self._spec_intensity(xyz, info, n_pts)
-            self._cost = getattr(self, "_cost", []) + [time.perf_counter() - t0]
-            if len(self._cost) == 100:
-                c = sorted(self._cost)
-                log.info("lidar %s: the spec's intensity took %.1f ms a scan (median of 100; "
-                         "max %.1f), %d points, %d object ids known", self.rig.name,
-                         1e3 * c[50], 1e3 * c[-1], n_pts, len(self.id_prims))
             if spec_inten is not None:
                 inten = spec_inten / 255.0  # pack_cloud takes [0, 1]
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
