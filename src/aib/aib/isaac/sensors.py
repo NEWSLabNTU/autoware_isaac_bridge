@@ -13,6 +13,7 @@ import logging
 import os
 
 from .. import intensity as intensitymod
+from .. import lidar_profile as lidarprof
 from ..frames import advance, compose, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
                        gnss_reading, imu_reading, motion_distort, pack_cloud, point_times,
@@ -115,6 +116,21 @@ class Lidar:
                 lidar = RtxLidar.create(f"{root}/lidar", config=rig.isaac.get("config", "OS1"),
                                         variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"),
                                         **aux)
+                prof = rig.isaac.get("profile")
+                if prof:
+                    # The spec's firing pattern (084b), CARLA's, over the stock profile's
+                    # physics: set before the render product, which reads it once
+                    prim = stage.GetPrimAtPath(lidar.paths[0])
+                    for name, value in lidarprof.attributes(prof).items():
+                        attr = prim.GetAttribute(name)
+                        if not attr:
+                            raise RuntimeError(f"lidar {rig.name}: the OmniLidar at "
+                                               f"{lidar.paths[0]} has no {name}")
+                        attr.Set(value)
+                    log.info("lidar %s: profile %s, %d rings %g..%g deg, %d columns at %g Hz, "
+                             "%g m, no drop-off", rig.name, prof["name"], prof["channels"],
+                             prof["lower_fov"], prof["upper_fov"], prof["columns"],
+                             prof["rate_hz"], prof["range"])
             rp = rep.create.render_product(lidar.paths[0], resolution=(128, 128))
             annotator = rep.AnnotatorRegistry.get_annotator("IsaacExtractRTXSensorPointCloud")
             annotator.attach([rp.path])
@@ -148,6 +164,10 @@ class Lidar:
             raise ValueError(f"lidar {rig.name}: point_format {self.point_format!r}, "
                              f"not one of {sorted(POINT_FORMATS)}")
         self.rings = bool(rig.isaac.get("rings_by_elevation", False))
+        # The spec's firing pattern (084b): rings by the profile's layout, and the first scan
+        # checked against it (Kit could serve a cached profile of the same name otherwise)
+        self.profile = rig.isaac.get("profile")
+        self.profile_checked = False
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
@@ -201,6 +221,19 @@ class Lidar:
         info = d.get("info", {})
         xyz = d["data"]
         n_pts = len(np.asarray(xyz).reshape(-1, 3))
+        ring = None
+        if self.profile:
+            p = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+            elev = np.degrees(np.arctan2(p[:, 2], np.hypot(p[:, 0], p[:, 1])))
+            if not self.profile_checked:
+                self.profile_checked = True
+                wrong = lidarprof.check(elev, self.profile)
+                if wrong:
+                    raise RuntimeError(f"lidar {self.rig.name}: profile "
+                                       f"{self.profile['name']} not in effect: {wrong}")
+                log.info("lidar %s: first scan on profile %s: %d points, %.2f..%.2f deg",
+                         self.rig.name, self.profile["name"], n_pts, elev.min(), elev.max())
+            ring = lidarprof.rings(elev, self.profile)
         ts = np.asarray(info.get("timestamp", ())).reshape(-1)
         ts = ts if len(ts) == n_pts else None
         if self.per_scan and ts is not None and not self.gate.new(ts):
@@ -229,7 +262,8 @@ class Lidar:
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
             xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
         n, data = pack_cloud(xyz, inten, info.get("elevation"), self.channels,
-                             fmt=self.point_format, rings=self.rings, time_stamp=offsets)
+                             fmt=self.point_format, rings=self.rings, time_stamp=offsets,
+                             ring=ring)
         fields, step = POINT_FORMATS[self.point_format]
         m = self.ros.m
         PF = m["PointField"]

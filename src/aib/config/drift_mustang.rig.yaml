@@ -62,7 +62,11 @@ sensors:
     rate_hz: 20.0
     range: 200.0
     vertical_fov: [-25.0, 15.0]
-    isaac: {config: OS1, variant: OS1_REV7_128ch20hz1024res}
+    isaac:
+      config: OS1
+      variant: OS1_REV7_128ch20hz1024res
+      profile: {name: spec_65f1ba86a28f_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
+        rate_hz: 20.0, range: 200.0}
   camera6:
     type: camera
     enabled: false

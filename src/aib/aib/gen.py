@@ -26,7 +26,9 @@ SPECS = DEPS / "sim_vehicle_spec/vehicles"
 
 from sim_vehicle_spec import emit  # noqa: E402
 from sim_vehicle_spec import spec as specmod  # noqa: E402
+from sim_vehicle_spec import gen as specgen  # noqa: E402
 
+from . import lidar_profile as lidarprof  # noqa: E402
 from .params import VehicleParams  # noqa: E402
 
 TOOL = "aib.gen (autoware_isaac_bridge `just generate`)"
@@ -105,6 +107,14 @@ def rig(spec, header, spec_rel):
         table = (s.get("carla") or {}).get("intensity")
         if s["type"] == "lidar" and table:
             entry["isaac"] = dict(entry.get("isaac") or {}, intensity=table)
+        # A lidar's firing pattern (084b): CARLA's, from the attributes the spec generates for
+        # it (rings even over the vertical FOV, no drop-off), unless the spec names a USD of
+        # its own; named by spec_hash so Kit never serves a profile of another spec.
+        if s["type"] == "lidar" and s.get("carla") and not (s["isaac"] or {}).get("usd"):
+            prof = lidarprof.profile(specgen.carla_attributes(s),
+                                     f"spec_{specmod.spec_hash(spec)[:12]}_{name}")
+            if prof:
+                entry["isaac"] = dict(entry.get("isaac") or {}, profile=prof)
         sensors[name] = entry
     doc = {
         "spec": spec_rel,

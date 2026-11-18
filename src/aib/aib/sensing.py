@@ -62,14 +62,15 @@ def pose_covariance(variances):
 
 
 def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", rings=False,
-               time_stamp=None):
+               time_stamp=None, ring=None):
     """Points (N x 3, sensor frame) to PointCloud2 bytes in `fmt`'s layout (POINT_FORMATS).
     Intensity in [0, 1] becomes 0-255. The channel is the elevation's place among `channels`
     evenly spaced rings, or with `rings` its rank among the elevations the scan has (a lidar
     whose lasers are not evenly spaced, as a VLP-32C's: each laser its own channel).
     `xyzircaedt` adds azimuth (atan2(y, x) in [0, 2 pi)), elevation and distance from the
     point, and each point's time_stamp (ns after the header's stamp, `point_times`), 0 when
-    `time_stamp` is not given: a frame's points then share its stamp."""
+    `time_stamp` is not given: a frame's points then share its stamp. `ring`, when given,
+    is each point's channel as it stands (a profile's, aib.lidar_profile.rings)."""
     import numpy as np
 
     xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
@@ -83,7 +84,9 @@ def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", 
         inten = np.asarray(intensity, dtype=np.float32).reshape(-1)
         if len(inten) == n:
             cloud["intensity"] = np.clip(inten * 255.0, 0, 255).astype(np.uint8)
-    if elevation is not None:
+    if ring is not None and len(ring) == n:
+        cloud["channel"] = np.asarray(ring, dtype=np.uint16).reshape(-1)
+    elif elevation is not None:
         elev = np.asarray(elevation, dtype=np.float32).reshape(-1)
         if len(elev) == n and n and rings:
             _, rank = np.unique(np.round(elev, 4), return_inverse=True)

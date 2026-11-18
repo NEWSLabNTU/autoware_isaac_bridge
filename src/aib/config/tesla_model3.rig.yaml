@@ -74,6 +74,8 @@ sensors:
           RailTrack: 15, Bridge: 25, Buildings: 40, Walls: 40, Fences: 45, GuardRail: 60, Poles: 50, TrafficLight: 50,
           TrafficSigns: 150, Vegetation: 45, Static: 40, Dynamic: 45, Other: 30, Sky: 0, Pedestrians: 50,
           Rider: 50, Car: 90, Truck: 90, Bus: 90, Train: 80, Motorcycle: 80, Bicycle: 60}
+      profile: {name: spec_dffb1d3df1f4_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
+        rate_hz: 20.0, range: 200.0}
   camera6:
     type: camera
     enabled: false
