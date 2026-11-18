@@ -131,9 +131,12 @@ def spec_path(rig_path, spec):
 
 
 def spec_doc(rig_path, spec, spec_hash):
-    """The document of the spec a rig names (`spec_path`), refused when its spec_hash is not
-    the rig's: the rig would be stale (`aib.gen`)."""
+    """The document of the spec a rig names (`spec_path`) as the body Isaac drives
+    (`aib.gen.isaac_body`), refused when its spec_hash is not the rig's: the rig would be stale
+    (`aib.gen`)."""
     from sim_vehicle_spec import spec as specmod
+
+    from .gen import isaac_body
 
     if not spec:
         raise ValueError(f"{rig_path}: no spec (regenerate the rig: aib.gen)")
@@ -143,7 +146,7 @@ def spec_doc(rig_path, spec, spec_hash):
     if spec_hash and have != spec_hash:
         raise ValueError(f"{rig_path}: generated from spec_hash {spec_hash[:12]}, but "
                          f"{path} is {have[:12]}: regenerate the rig (aib.gen)")
-    return loaded.doc
+    return isaac_body(loaded).doc
 
 
 # NDT's pose, which Autoware's EKF takes (and the lockstep waits for by default)

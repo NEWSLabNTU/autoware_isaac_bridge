@@ -12,7 +12,10 @@ sensors are built from is generated from it here; Autoware's packages for the sa
 (`tesla_model3_description`, `tesla_model3_sensor_kit_launch`, ...) are generated from it in
 [autoware_sim_vehicle](https://github.com/NEWSLabNTU/autoware_sim_vehicle) (a submodule at
 `deps/autoware_sim_vehicle`), and CARLA's files and the SSv2 catalog in sim_vehicle_spec
-itself. Every generated file names the spec's `spec_hash`.
+itself. Every generated file names the spec's `spec_hash`. The spec describes the real car
+and the body each simulator drives; the rig is the body Isaac drives (the spec's
+`simulators.isaac`: for the Model 3, `carla-0.9.16`, since the Isaac ego's USD is CARLA
+0.9.16's model3), so Autoware runs `vehicle_model:=tesla_model3` on Isaac.
 
 ## What is in it
 

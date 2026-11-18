@@ -23,7 +23,8 @@ def doc():
 
 class ShippedSpecTest(unittest.TestCase):
     def setUp(self):
-        self.spec = specmod.load(SPEC)
+        # Isaac drives the spec's carla-0.9.16 body (its USD is that asset's)
+        self.spec = gen.isaac_body(specmod.load(SPEC))
 
     def test_it_is_scensims_model3_as_the_rwd(self):
         # swb 4aefee8's vehicle_params.py (the plausible real Model 3), with the RWD's mass,
@@ -99,7 +100,8 @@ class SpecVocabularyTest(unittest.TestCase):
             d = doc()
             d["powertrain"]["drive_axle"] = axle
             specmod.validate(d)
-            self.assertEqual(Calibration.from_spec(d).drive_axle, axle)
+            e = gen.isaac_body(specmod.Spec(SPEC, d, source=d))
+            self.assertEqual(Calibration.from_spec(e.doc).drive_axle, axle)
             self.assertEqual(set(specmod.DRIVE_AXLES), set(powertrain.DRIVE_AXLES))
 
     def test_it_reads_the_submodule(self):

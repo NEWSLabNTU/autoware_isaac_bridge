@@ -33,7 +33,8 @@ TOOL = "aib.gen (autoware_isaac_bridge `just generate`)"
 
 
 def vehicle_params(spec):
-    """The flat VehicleParams of a spec: the PhysX vehicle."""
+    """The flat VehicleParams of a spec: the PhysX vehicle, on the body Isaac drives."""
+    spec = isaac_body(spec)
     d = spec.doc
     g, i, w, t = d["geometry"], d["inertia"], d["wheels"], d["tires"]
     rs = d.get("resistance")
@@ -74,7 +75,16 @@ def vehicle_params(spec):
     return VehicleParams.from_dict(out)
 
 
+def isaac_body(spec):
+    """The spec as the body Isaac drives (sim_vehicle_spec's `simulators.isaac`, else its
+    default body; a spec without bodies is its own). The Isaac ego's USD is that body's."""
+    names = specmod.bodies(spec)
+    body = specmod.simulator_body(spec, "isaac") or (names[0] if names else None)
+    return specmod.effective(spec, body)
+
+
 def rig(spec, header, spec_rel):
+    spec = isaac_body(spec)
     center, dims = specmod.box(spec)
     gc = spec.section("body").get("ground_clearance")
     sensors = {}

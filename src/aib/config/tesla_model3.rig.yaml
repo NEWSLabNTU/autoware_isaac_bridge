@@ -1,15 +1,15 @@
-# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 01b4d3f5273572098cee2052d1c0affe8aeded8d3c71ae2b27a57c350cbcb9f1) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash dffb1d3df1f4ae564235a87c84c1a5a4b402f4d41d265186976561b96d31273c) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/tesla_model3.yaml
 name: tesla_model3
-description: Tesla Model 3 RWD (physics, drivetrain) on the CARLA vehicle.tesla.model3 body (geometry)
-assumptions: [brakes.abs, brakes.dead_time, brakes.time_constant, carla.physics.body_com, carla.physics.drag_area,
-  inertia.com_front_fraction, inertia.com_height, inertia.inertia_box, powertrain.motor_max_rpm, powertrain.motor_time_constant,
-  powertrain.regen_fade_speeds, powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control,
-  resistance.frontal_area, resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip,
-  wheels.mass]
-spec_hash: 01b4d3f5273572098cee2052d1c0affe8aeded8d3c71ae2b27a57c350cbcb9f1
+description: Tesla Model 3 RWD; each simulator runs it on its own body (bodies)
+assumptions: [bodies.carla-0.9.16.carla.physics.body_com, bodies.carla-0.9.16.carla.physics.drag_area,
+  brakes.abs, brakes.dead_time, brakes.time_constant, inertia.com_front_fraction, inertia.com_height,
+  inertia.inertia_box, powertrain.motor_max_rpm, powertrain.motor_time_constant, powertrain.regen_fade_speeds,
+  powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control, resistance.frontal_area,
+  resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip, wheels.mass]
+spec_hash: dffb1d3df1f4ae564235a87c84c1a5a4b402f4d41d265186976561b96d31273c
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.416, 0.0, 0.744]
