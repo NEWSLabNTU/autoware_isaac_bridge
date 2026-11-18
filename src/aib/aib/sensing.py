@@ -222,5 +222,10 @@ class Periodic:
             return True
         return False
 
+    def peek(self, t):
+        """Whether `due(t)` would fire, without taking it (the frame's render is decided
+        before the frame's publish takes it)."""
+        return self.period <= 0 or t + 1e-9 >= self.next
+
     def reset(self):
         self.next = 0.0

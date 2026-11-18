@@ -148,6 +148,10 @@ class Lidar:
         self.clock += dt
         self.track.append((self.clock, (x, y, z), tuple(q)))
 
+    def render_at(self, t):
+        """Every frame: a scan is built over consecutive renders (`latency_frames`)."""
+        return True
+
     def ready(self):
         if self.fresh > 0:
             self.fresh -= 1
@@ -260,6 +264,7 @@ class Camera:
             prim.CreateAttribute("omni:rtx:autoExposure:enabled", Sdf.ValueTypeNames.Bool).Set(True)
         self.render_product = rep.create.render_product(str(cam.GetPath()),
                                                         resolution=(self.width, self.height))
+        self.rendering = True   # whether its render product updates (render_at)
         self.annotator = rep.AnnotatorRegistry.get_annotator("rgb")
         self.annotator.attach([self.render_product.path])
         self.pub, self.info_pub = ros.sensor_publisher(rig)
@@ -268,6 +273,17 @@ class Camera:
 
     def ready(self):
         return True
+
+    def render_at(self, t):
+        """Whether the frame ending at sim time `t` renders this camera: only when it publishes
+        then, at the rig's rate (30 Hz under 100 Hz frames: one render in three), its render
+        product's updates switched off between (Isaac's own pattern for a sensor at its own
+        rate; scensim 077 item 26: every 10 ms frame rendered the camera, RTF 0.15)."""
+        due = self.timer.peek(t)
+        if due != self.rendering:
+            self.render_product.hydra_texture.set_updates_enabled(due)
+            self.rendering = due
+        return due
 
     def publish(self, state, sim_time, stamp):
         if not self.timer.due(sim_time):

@@ -57,6 +57,12 @@ class Ego:
         """Whether a frame must render for this ego's sensors."""
         return any(s.renders for s in self.sensors)
 
+    def renders_at(self, t):
+        """Whether the frame ending at sim time `t` must render for this ego's sensors: a
+        lidar every frame, a camera only when it publishes then (each switches its render
+        product on or off accordingly, so every rendering sensor is asked)."""
+        return any([s.render_at(t) for s in self.sensors if s.renders])
+
     def warm_up(self, step, frames=WARM_UP_FRAMES):
         """Step (physics and a render) until the rendering sensors deliver: their first
         frames set up the RTX pipeline, seconds on a loaded host, which belong in the spawn

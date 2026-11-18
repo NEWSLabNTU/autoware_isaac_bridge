@@ -194,6 +194,23 @@ class MiscTest(unittest.TestCase):
         self.assertEqual(fired, [0.0, 0.1, 0.2])
         self.assertTrue(all(Periodic(0).due(t) for t in (0.0, 0.0, 0.01)))
 
+    def test_peek_says_what_due_will_do_without_taking_it(self):
+        """A 30 Hz camera under 100 Hz frames renders in the frames it publishes in
+        (Camera.render_at peeks, publish takes): one frame in three or four."""
+        p = Periodic(1 / 30)
+        rendered, published = [], []
+        for i in range(1, 31):
+            t = i * 0.01
+            if p.peek(t):
+                rendered.append(i)
+            if p.due(t):
+                published.append(i)
+        self.assertEqual(rendered, published)
+        # every 4th frame: Periodic re-arms from the frame it fired in, so a 30 Hz camera
+        # under 10 ms frames publishes at 25 Hz (rung_check's --min-camera-hz 25)
+        self.assertEqual(published, [1, 5, 9, 13, 17, 21, 25, 29])
+        self.assertTrue(Periodic(0).peek(5.0))
+
 
 
 
