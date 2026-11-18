@@ -12,6 +12,7 @@ import logging
 
 import os
 
+from .. import intensity as intensitymod
 from ..frames import advance, compose, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
                        gnss_reading, imu_reading, motion_distort, pack_cloud, point_times,
@@ -104,18 +105,42 @@ class Lidar:
         if kept is None or not stage.GetPrimAtPath(kept[0]):
             ops = _mount(stage, root, self.mount).GetOrderedXformOps()
             usd = rig.isaac.get("usd")
+            # The spec's reflectance table (084): each point's object id and hit normal, which
+            # only an OmniLidar authored with auxOutputType FULL at creation reports.
+            aux = {"aux_output_level": "FULL"} if rig.isaac.get("intensity") else {}
             if usd:
                 # An OmniLidar profile of our own (a lidar Isaac does not ship), by path
-                lidar = RtxLidar.create(f"{root}/lidar", usd_path=os.path.expandvars(usd))
+                lidar = RtxLidar.create(f"{root}/lidar", usd_path=os.path.expandvars(usd), **aux)
             else:
                 lidar = RtxLidar.create(f"{root}/lidar", config=rig.isaac.get("config", "OS1"),
-                                        variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"))
+                                        variant=rig.isaac.get("variant", "OS1_REV7_128ch20hz1024res"),
+                                        **aux)
             rp = rep.create.render_product(lidar.paths[0], resolution=(128, 128))
             annotator = rep.AnnotatorRegistry.get_annotator("IsaacExtractRTXSensorPointCloud")
             annotator.attach([rp.path])
-            kept = Lidar.kept[root] = (lidar.paths[0], rp, annotator, ops)
+            ids = None
+            if aux:
+                # the prims there are when the map is made: a body spawned later is placed by
+                # its world server's entity boxes (intensity.set_entity_source)
+                ids = rep.AnnotatorRegistry.get_annotator("StableIdMap")
+                ids.attach([rp.path])
+            kept = Lidar.kept[root] = (lidar.paths[0], rp, annotator, ops, ids)
             self.fresh = 0
-        path, self.render_product, self.annotator, (self.translate, self.orient) = kept
+        path, self.render_product, self.annotator, (self.translate, self.orient), self.ids = kept
+        self.stage = stage
+        table = rig.isaac.get("intensity")
+        self.table = intensitymod.Table(table) if table else None
+        if self.table and self.ids is None:
+            log.warning("lidar %s: the intensity table needs a lidar created with auxOutputType "
+                        "FULL; the one kept at %s was not: Isaac's own intensity", rig.name, path)
+            self.table = None
+        self.id_prims = {}      # (low, high) object id -> prim path, from StableIdMap
+        self.prim_refl = {}     # prim path -> reflectance (its nearest qcode's)
+        self.id_refl = intensitymod.IdReflectance(self._reflectances)
+        # The RTX annotator's hitNormal is in the sensor's frame, as its points are (measured
+        # 2026-11-18: with the world's, cars came out at a fifth of CARLA's; with the sensor's,
+        # within 10 % at 11 m). `normals_frame: world` turns the rays into the world instead.
+        self.normals_world = rig.isaac.get("normals_frame", "sensor") == "world"
         self.channels = int(rig.extra.get("channels", 128))
         # `xyzirc` (default) or `xyzircaedt` (Nebula's, as a real Velodyne driver publishes)
         self.point_format = rig.isaac.get("point_format", "xyzirc")
@@ -196,9 +221,22 @@ class Lidar:
                 xyz = motion_distort(xyz, ts.astype(np.float64) * 1e-9, t_ref,
                                      [a for a, _, _ in tr], [b for _, b, _ in tr],
                                      [c for _, _, c in tr])
+        inten = info.get("intensity")
+        if self.table is not None:
+            import time
+            t0 = time.perf_counter()
+            spec_inten = self._spec_intensity(xyz, info, n_pts)
+            self._cost = getattr(self, "_cost", []) + [time.perf_counter() - t0]
+            if len(self._cost) == 100:
+                c = sorted(self._cost)
+                log.info("lidar %s: the spec's intensity took %.1f ms a scan (median of 100; "
+                         "max %.1f), %d points, %d object ids known", self.rig.name,
+                         1e3 * c[50], 1e3 * c[-1], n_pts, len(self.id_prims))
+            if spec_inten is not None:
+                inten = spec_inten / 255.0  # pack_cloud takes [0, 1]
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
             xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
-        n, data = pack_cloud(xyz, info.get("intensity"), info.get("elevation"), self.channels,
+        n, data = pack_cloud(xyz, inten, info.get("elevation"), self.channels,
                              fmt=self.point_format, rings=self.rings, time_stamp=offsets)
         fields, step = POINT_FORMATS[self.point_format]
         m = self.ros.m
@@ -218,6 +256,90 @@ class Lidar:
         # array.array, not bytes: rclpy copies an array in C, bytes element by element (40 ms)
         msg.data = array.array("B", data)
         return msg
+
+    def _spec_intensity(self, xyz, info, n_pts):
+        """Each point's intensity from the spec's table (084): reflectance of the class of the
+        prim it hit x |cos incidence|, uint8; None (Isaac's own) without ids and normals."""
+        import numpy as np
+        raw_ids, normals = info.get("objectId"), info.get("hitNormal", info.get("normal"))
+        if not getattr(self, "_told_keys", False):
+            self._told_keys = True
+            log.info("lidar %s: annotator info %s", self.rig.name, sorted(info))
+        if raw_ids is None or normals is None:
+            if not getattr(self, "_told_missing", False):
+                self._told_missing = True
+                log.warning("lidar %s: no objectId/hitNormal in the annotator's info: Isaac's "
+                            "own intensity", self.rig.name)
+            return None
+        ids = intensitymod.object_ids(raw_ids)
+        normals = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
+        if len(ids) != n_pts or len(normals) != n_pts:
+            log.warning("lidar %s: %d points, %d ids, %d normals: Isaac's own intensity",
+                        self.rig.name, n_pts, len(ids), len(normals))
+            return None
+        pts = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+        if self.normals_world:
+            # the ray in the world: the sensor's orientation on the points it reports
+            pts = pts @ _matrix(self._world_quat()).T
+        cos = intensitymod.incidence_cos(pts, normals)
+        refl, placed = self.id_refl(ids)
+        source = intensitymod.entity_source()
+        if not placed.all() and source is not None:
+            boxes = source()
+            loose = np.flatnonzero(~placed)
+            raw = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)[loose]
+            world = (raw @ _matrix(self._world_quat()).T
+                     + np.asarray(self.translate.Get(), dtype=np.float64))
+            hit = intensitymod.box_classes(world, boxes) if boxes else np.full(len(loose), -1)
+            for i, (_m, _c, _d, qcode) in enumerate(boxes):
+                refl[loose[hit == i]] = self.table.of_qcode(qcode)
+            log.debug("lidar %s: %d points without a prim, %d of them in no entity box",
+                      self.rig.name, len(loose), int((hit < 0).sum()))
+        return intensitymod.intensity(refl, cos)
+
+    def _world_quat(self):
+        q = self.orient.Get()
+        im = q.GetImaginary()
+        return (q.GetReal(), im[0], im[1], im[2])
+
+    def _reflectances(self, keys):
+        """(reflectance, keep) of each object id in `keys` (intensity.IdReflectance's resolve):
+        the class of its prim (StableIdMap, read when an id is new), or for an id with none
+        (a body spawned after the map) the table's default, not kept: its points are placed
+        by the entity boxes."""
+        if any(k not in self.id_prims for k in keys) and self.ids is not None:
+            d = self.ids.get_data()
+            raw = d.get("data") if isinstance(d, dict) else d
+            n = len(raw) if raw is not None else 0
+            if n != getattr(self, "_map_bytes", None) and n >= 4:
+                self._map_bytes = n
+                self.id_prims.update(intensitymod.stable_id_map(raw))
+                log.info("lidar %s: StableIdMap: %d prims", self.rig.name, len(self.id_prims))
+        vals, keep = [], []
+        for k in keys:
+            path = self.id_prims.get(k)
+            if path is None:
+                vals.append(self.table.default)
+                keep.append(False)
+                continue
+            refl = self.prim_refl.get(path)
+            if refl is None:
+                refl = self.prim_refl[path] = self.table.of_qcode(self._qcode(path))
+            vals.append(refl)
+            keep.append(True)
+        return vals, keep
+
+    def _qcode(self, path):
+        """The nearest Q-code on the prim at `path` or its ancestors (None: unlabelled)."""
+        prim = self.stage.GetPrimAtPath(path)
+        while prim and prim.IsValid() and not prim.IsPseudoRoot():
+            a = prim.GetAttribute(intensitymod.QCODE_ATTR)
+            if a and a.HasValue():
+                v = a.Get()
+                if v:
+                    return str(v[0]) if not isinstance(v, str) else v
+            prim = prim.GetParent()
+        return None
 
     def close(self):
         """Nothing to tear down: the lidar stays, live, for the next vehicle at this path."""

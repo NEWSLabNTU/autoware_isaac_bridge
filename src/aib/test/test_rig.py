@@ -45,7 +45,9 @@ class RigTest(unittest.TestCase):
                                                    "top": {"isaac": {"variant": "x"}}})
         self.assertEqual(r.vehicle.tire_friction, 0.7)
         self.assertTrue(r.sensors["camera6"].enabled)
-        self.assertEqual(r.sensors["top"].isaac, {"config": "OS1", "variant": "x"})
+        top = r.sensors["top"].isaac
+        self.assertEqual((top["config"], top["variant"]), ("OS1", "x"))
+        self.assertEqual(top["intensity"]["reflectance"]["Car"], 90)  # the spec's table stays
         with self.assertRaises(ValueError):
             Rig.load(RIG, None, {"radar": {"enabled": True}})
         with self.assertRaises(ValueError):
@@ -163,7 +165,9 @@ class OutsideVehicleTest(unittest.TestCase):
 
         (self.d / "isaac/lidars").mkdir()
         text = self.rig.read_text()
-        self.rig.write_text(re.sub(r"(\n    isaac: \{)", r"\1usd: lidars/x.usda, ", text, count=1))
+        # the lidar's isaac block (the first sensor's): a profile of our own beside its config
+        self.rig.write_text(re.sub(r"(\n    isaac:\n)", r"\1      usd: lidars/x.usda\n", text,
+                                   count=1))
         ego = self.d / "isaac/ego.yaml"
         ego.write_text("rig: car.rig.yaml\nbody: body/entry.json\n")
         os.environ["ROS_DOMAIN_ID"] = "17"

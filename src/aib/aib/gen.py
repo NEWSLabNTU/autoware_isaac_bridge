@@ -100,6 +100,11 @@ def rig(spec, header, spec_rel):
             entry["k"] = specmod.camera_intrinsics(s["width"], s["height"], s["horizontal_fov"])
         if s["isaac"]:
             entry["isaac"] = s["isaac"]
+        # A lidar's reflectance table (084): the spec's, which CARLA's semantic lidar applies
+        # (`carla.intensity`), so Isaac's intensity follows the same rule
+        table = (s.get("carla") or {}).get("intensity")
+        if s["type"] == "lidar" and table:
+            entry["isaac"] = dict(entry.get("isaac") or {}, intensity=table)
         sensors[name] = entry
     doc = {
         "spec": spec_rel,
