@@ -9,6 +9,7 @@ GNSS are computed from the vehicle's state (`aib.sensing`); the lidar and camera
 import array
 import collections
 import logging
+import math
 
 import os
 
@@ -168,10 +169,17 @@ class Lidar:
         # checked against it (Kit could serve a cached profile of the same name otherwise)
         self.profile = rig.isaac.get("profile")
         self.profile_checked = False
+        # column-phase drift (084e, opt-in; lidar_profile.PhaseJitter says why)
+        self.jitter = lidarprof.PhaseJitter.of(self.profile)
+        self.delta = self.jitter.next() if self.jitter else 0.0
+        if self.jitter:
+            log.info("lidar %s: column phase drifts within %.3f deg a scan (seed %d)", rig.name,
+                     self.jitter.column, self.jitter.seed)
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
         self.stamps = collections.deque(maxlen=self.latency + 1)  # the last frames' stamps
+        self.deltas = collections.deque(maxlen=self.latency + 1)  # their phase turns (084e)
         aedt = self.point_format == "xyzircaedt"
         self.per_scan = rig.isaac.get("publish", "scan") == "scan"
         self.point_times = bool(rig.isaac.get("point_times", aedt)) and aedt
@@ -188,6 +196,8 @@ class Lidar:
         from pxr import Gf
 
         (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.mount)
+        if self.delta:
+            _, q = compose(((x, y, z), q), ((0.0, 0.0, 0.0), rpy_quat(0.0, 0.0, math.radians(self.delta))))
         self.translate.Set(Gf.Vec3d(x, y, z))
         self.orient.Set(Gf.Quatd(*q))
         self.clock += dt
@@ -205,6 +215,9 @@ class Lidar:
             self.pub.publish(self.pending)
             self.ros.note_scan(self.pending.header.stamp)  # what the lockstep waits for
         self.stamps.append(stamp)
+        self.deltas.append(self.delta)          # the turn this frame was rendered with
+        if self.jitter:
+            self.delta = self.jitter.next()
         self.frame_dt, self.frame_start = self.clock - self.frame_start, self.clock
         # the data read now was rendered `latency` frames ago: until then there is no stamp for it
         self.pending = (self._msg(self.stamps[0], sim_time - self.clock)
@@ -259,6 +272,8 @@ class Lidar:
             spec_inten = self._spec_intensity(xyz, info, n_pts)
             if spec_inten is not None:
                 inten = spec_inten / 255.0  # pack_cloud takes [0, 1]
+        if self.deltas and self.deltas[0]:
+            xyz = lidarprof.unturn(xyz, self.deltas[0])  # the prim was turned by this scan's phase
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
             xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
         n, data = pack_cloud(xyz, inten, info.get("elevation"), self.channels,

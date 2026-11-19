@@ -114,3 +114,26 @@ def test_the_stock_os1_fails_off_the_rings():
 def test_a_scan_missing_its_lowest_rings_fails_on_coverage():
     rings = np.array(lp.elevations(P))
     assert "rings at or below -1 deg have a point" in lp.check(rings[rings > -21.5], P)
+
+
+def test_phase_jitter_is_opt_in_seeded_and_within_a_column():
+    assert lp.PhaseJitter.of({"columns": 1024}) is None
+    assert lp.PhaseJitter.of(None) is None
+    a = lp.PhaseJitter.of({"columns": 1024, "phase_jitter": {"seed": 3}})
+    b = lp.PhaseJitter.of({"columns": 1024, "phase_jitter": {"seed": 3}})
+    da, db = [a.next() for _ in range(500)], [b.next() for _ in range(500)]
+    assert da == db                                   # a seed repeats the run
+    assert 0.0 <= min(da) and max(da) < 360.0 / 1024
+    assert max(da) - min(da) > 0.9 * 360.0 / 1024     # spreads over the column
+    assert lp.PhaseJitter.of({"columns": 1024, "phase_jitter": None}).seed == 0
+    c = lp.PhaseJitter.of({"columns": 1024, "phase_jitter": {"seed": 4}})
+    assert [c.next() for _ in range(5)] != da[:5]
+
+
+def test_unturn_puts_a_turned_lidars_points_back():
+    # a point straight ahead of the world, seen by a lidar turned +10 deg about z, lies at
+    # -10 deg in the turned lidar's frame; unturn returns it to straight ahead
+    d = 10.0
+    seen = np.array([[np.cos(np.radians(-d)) * 5, np.sin(np.radians(-d)) * 5, 1.0]])
+    np.testing.assert_allclose(lp.unturn(seen, d), [[5.0, 0.0, 1.0]], atol=1e-9)
+    np.testing.assert_allclose(lp.unturn(seen, 0.0), seen)

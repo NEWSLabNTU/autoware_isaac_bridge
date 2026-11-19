@@ -119,3 +119,38 @@ def check(elevation_deg, p, tol=None):
         return (f"only {low_hit.sum()} of the {len(low)} rings at or below -1 deg have a point "
                 f"(the lowest point at {e.min():.2f} deg)")
     return None
+
+
+class PhaseJitter:
+    """Column-phase drift (084e), opt-in: `phase_jitter: {seed: N}` in the rig's profile.
+
+    A real spinning lidar is not phase-locked to the frame, so its columns fall at a new azimuth
+    every turn. Isaac's rotary lidar starts every scan at the same one (and rebuilds itself when
+    startAzimuthOffsetDeg changes), so a thin pole is hit in every scan or in none. The sensor
+    turns the lidar prim about its own z by `delta` (degrees, drawn within one column, seeded)
+    for a frame and turns that frame's points back with `unturn`: the columns land elsewhere on
+    the world, the cloud's frame stays. None from `of` when the profile does not ask for it."""
+
+    def __init__(self, seed, columns):
+        self.rng = np.random.default_rng(int(seed))
+        self.column = 360.0 / float(columns)
+        self.seed = int(seed)
+
+    @classmethod
+    def of(cls, p):
+        cfg = (p or {}).get("phase_jitter", "absent")
+        if cfg == "absent":
+            return None
+        return cls((cfg or {}).get("seed", 0), p["columns"])
+
+    def next(self):
+        """The next frame's turn, degrees in [0, one column)."""
+        return float(self.rng.uniform(0.0, self.column))
+
+
+def unturn(xyz, delta):
+    """Points (N x 3, the lidar's frame) seen by a lidar turned `delta` degrees about its z, in
+    the unturned lidar's frame."""
+    c, s = np.cos(np.radians(delta)), np.sin(np.radians(delta))
+    return np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ np.array(
+        [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]).T
