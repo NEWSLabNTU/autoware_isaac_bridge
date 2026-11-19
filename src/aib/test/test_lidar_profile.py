@@ -137,3 +137,13 @@ def test_unturn_puts_a_turned_lidars_points_back():
     seen = np.array([[np.cos(np.radians(-d)) * 5, np.sin(np.radians(-d)) * 5, 1.0]])
     np.testing.assert_allclose(lp.unturn(seen, d), [[5.0, 0.0, 1.0]], atol=1e-9)
     np.testing.assert_allclose(lp.unturn(seen, 0.0), seen)
+
+
+def test_phase_jitter_streams_differ_per_lidar_and_need_columns():
+    p = {"columns": 1024, "phase_jitter": {"seed": 1}}
+    a, b = lp.PhaseJitter.of(p, "top"), lp.PhaseJitter.of(p, "left")
+    assert [a.next() for _ in range(5)] != [b.next() for _ in range(5)]
+    c = lp.PhaseJitter.of(p, "top")
+    assert c.next() == lp.PhaseJitter.of(p, "top").next()      # stable: crc32, not hash()
+    with pytest.raises(ValueError, match="columns"):
+        lp.PhaseJitter.of({"name": "x", "phase_jitter": {}}, "top")

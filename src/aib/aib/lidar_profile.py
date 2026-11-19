@@ -16,6 +16,8 @@ ring, as CARLA fires them; the published PointCloud2's `channel` (`rings`) count
 lowest, 0 the lowest ring, as aib numbers every lidar's.
 """
 
+import zlib
+
 import numpy as np
 
 CORE = "omni:sensor:Core:"
@@ -129,19 +131,27 @@ class PhaseJitter:
     startAzimuthOffsetDeg changes), so a thin pole is hit in every scan or in none. The sensor
     turns the lidar prim about its own z by `delta` (degrees, drawn within one column, seeded)
     for a frame and turns that frame's points back with `unturn`: the columns land elsewhere on
-    the world, the cloud's frame stays. None from `of` when the profile does not ask for it."""
+    the world, the cloud's frame stays. None from `of` when the profile does not ask for it.
 
-    def __init__(self, seed, columns):
-        self.rng = np.random.default_rng(int(seed))
-        self.column = 360.0 / float(columns)
+    One turn a revolution: the sensor refuses it unless a revolution is one frame, since the
+    points of a revolution rendered over several frames would carry several turns and come back
+    with one. The stream is seeded by the seed and the lidar's name (crc32, stable across
+    runs), so two lidars of one rig do not drift in lockstep."""
+
+    def __init__(self, seed, columns, lidar=""):
         self.seed = int(seed)
+        self.rng = np.random.default_rng([self.seed, zlib.crc32(lidar.encode())])
+        self.column = 360.0 / float(columns)
 
     @classmethod
-    def of(cls, p):
+    def of(cls, p, lidar=""):
         cfg = (p or {}).get("phase_jitter", "absent")
         if cfg == "absent":
             return None
-        return cls((cfg or {}).get("seed", 0), p["columns"])
+        if "columns" not in p:
+            raise ValueError(f"lidar profile {p.get('name', lidar)}: phase_jitter needs "
+                             "`columns` (one turn is drawn within one column)")
+        return cls((cfg or {}).get("seed", 0), p["columns"], lidar)
 
     def next(self):
         """The next frame's turn, degrees in [0, one column)."""

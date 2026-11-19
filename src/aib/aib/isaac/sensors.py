@@ -170,7 +170,7 @@ class Lidar:
         self.profile = rig.isaac.get("profile")
         self.profile_checked = False
         # column-phase drift (084e, opt-in; lidar_profile.PhaseJitter says why)
-        self.jitter = lidarprof.PhaseJitter.of(self.profile)
+        self.jitter = lidarprof.PhaseJitter.of(self.profile, rig.name)
         self.delta = self.jitter.next() if self.jitter else 0.0
         if self.jitter:
             log.info("lidar %s: column phase drifts within %.3f deg a scan (seed %d)", rig.name,
@@ -196,12 +196,13 @@ class Lidar:
         from pxr import Gf
 
         (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.mount)
+        self.clock += dt
+        # the track is the sensor's motion only: the phase turn is undone whole by unturn
+        self.track.append((self.clock, (x, y, z), tuple(q)))
         if self.delta:
             _, q = compose(((x, y, z), q), ((0.0, 0.0, 0.0), rpy_quat(0.0, 0.0, math.radians(self.delta))))
         self.translate.Set(Gf.Vec3d(x, y, z))
         self.orient.Set(Gf.Quatd(*q))
-        self.clock += dt
-        self.track.append((self.clock, (x, y, z), tuple(q)))
 
     def ready(self):
         if self.fresh > 0:
@@ -219,6 +220,13 @@ class Lidar:
         if self.jitter:
             self.delta = self.jitter.next()
         self.frame_dt, self.frame_start = self.clock - self.frame_start, self.clock
+        if self.jitter and len(self.stamps) > 1:   # the first frame_dt includes the warm-up
+            # one turn a frame is one turn a revolution only when a revolution is a frame
+            rev = 1.0 / float(self.profile["rate_hz"])
+            if abs(self.frame_dt - rev) > 1e-4:
+                raise RuntimeError(
+                    f"lidar {self.rig.name}: phase_jitter needs one revolution a frame; the "
+                    f"profile turns in {rev * 1e3:.3f} ms, a frame is {self.frame_dt * 1e3:.3f} ms")
         # the data read now was rendered `latency` frames ago: until then there is no stamp for it
         self.pending = (self._msg(self.stamps[0], sim_time - self.clock)
                         if len(self.stamps) > self.latency else None)
