@@ -45,7 +45,7 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
-from ..control import Command, State, ackermann
+from ..control import Command, State, ackermann, driven_wheels, release_sticky
 from ..deps import use
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams, road_load
@@ -110,6 +110,8 @@ class Vehicle:
         self.path = path
         self.p = p = params
         self.ecu = Ecu(calibration)
+        self.brake_floor = calibration.brake_floor
+        self.driven = driven_wheels(calibration.powertrain, calibration.drive_axle)
         ensure_vehicle_scene(stage)
         root = UsdGeom.Xform.Define(stage, path)
         prim = root.GetPrim()
@@ -301,7 +303,9 @@ class Vehicle:
         else:
             left = right = self.tire_angle
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
-        for (_, d, b, s), drive, brake, angle in zip(self.wheels, act.drive, act.brake, angles):
+        drives, brakes = release_sticky(act.drive, act.brake, cmd.velocity, cmd.gear,
+                                        self.brake_floor, p.release_torque, self.driven)
+        for (_, d, b, s), drive, brake, angle in zip(self.wheels, drives, brakes, angles):
             d.Set(drive)
             b.Set(brake)
             s.Set(angle)

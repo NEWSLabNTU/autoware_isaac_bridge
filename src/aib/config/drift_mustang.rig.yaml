@@ -49,6 +49,7 @@ vehicle:
   sticky_tire_threshold_time: 1.0
   longitudinal_sticky_tire_damping: 200.0
   lateral_sticky_tire_damping: 20.0
+  release_torque: 1.0
 sensors:
   top:
     type: lidar

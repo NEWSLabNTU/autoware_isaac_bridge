@@ -5,7 +5,8 @@ import math
 import unittest
 
 _paths = __import__("_paths")  # sys.path, for direct runs
-from aib.control import GEAR_DRIVE, GEAR_PARK, ackermann, gear_from_command
+from aib.control import (GEAR_DRIVE, GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, ackermann,
+                         driven_wheels, gear_from_command, release_sticky)
 from aib.params import (G, VehicleMismatch, VehicleParams, bicycle_limit, check_geometry,
                         road_load)
 
@@ -85,3 +86,43 @@ class SteeringTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseStickyTest(unittest.TestCase):
+    """Issue 070: a car in gear asked to move, its brakes released, gets the release torque on
+    its driven wheels, so PhysX's sticky tyres let it roll; anything else passes unchanged."""
+    REAR = driven_wheels("ev", "rear")
+    ZERO, FLOOR = (0.0,) * 4, 50.0
+
+    def test_the_driven_wheels(self):
+        self.assertEqual(self.REAR, (False, False, True, True))
+        self.assertEqual(driven_wheels("ev", "front"), (True, True, False, False))
+        self.assertEqual(driven_wheels("ev", "all"), (True,) * 4)
+        self.assertEqual(driven_wheels("ideal", "rear"), (True,) * 4)
+
+    def test_released_brakes_and_a_target_get_the_release_torque(self):
+        # Autoware's downhill start: -0.028 m/s^2 is ~4.7 N m a wheel, below the floor
+        drive, brake = release_sticky(self.ZERO, (4.7,) * 4, 0.25, GEAR_DRIVE, self.FLOOR, 1.0,
+                                      self.REAR)
+        self.assertEqual(drive, (0.0, 0.0, 1.0, 1.0))
+        self.assertEqual(brake, self.ZERO)
+        drive, _ = release_sticky(self.ZERO, self.ZERO, -0.5, GEAR_REVERSE, self.FLOOR, 1.0,
+                                  self.REAR)
+        self.assertEqual(drive, (0.0, 0.0, -1.0, -1.0))
+
+    def test_anything_else_passes_unchanged(self):
+        cases = [
+            (self.ZERO, (1500.0,) * 4, 0.0, GEAR_DRIVE),     # target 0: the hold brake
+            (self.ZERO, (4.7,) * 4, 0.005, GEAR_DRIVE),      # a target below MOVE_VELOCITY
+            (self.ZERO, (60.0,) * 4, 0.25, GEAR_DRIVE),      # a brake past the floor
+            ((0.0, 0.0, 30.0, 30.0), self.ZERO, 0.25, GEAR_DRIVE),  # already driving
+            (self.ZERO, self.ZERO, 0.25, GEAR_NEUTRAL),
+            (self.ZERO, self.ZERO, 0.25, GEAR_PARK),
+        ]
+        for drive, brake, v, gear in cases:
+            self.assertEqual(release_sticky(drive, brake, v, gear, self.FLOOR, 1.0, self.REAR),
+                             (drive, brake), (drive, brake, v, gear))
+        # release_torque 0 turns it off
+        self.assertEqual(release_sticky(self.ZERO, self.ZERO, 0.25, GEAR_DRIVE, self.FLOOR, 0.0,
+                                        self.REAR), (self.ZERO, self.ZERO))
+

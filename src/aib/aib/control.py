@@ -12,6 +12,30 @@ from dataclasses import dataclass, field
 
 # Autoware's GearCommand / GearReport values
 GEAR_NEUTRAL, GEAR_DRIVE, GEAR_REVERSE, GEAR_PARK = 1, 2, 20, 22
+MOVE_VELOCITY = 0.01  # m/s: a target above this asks the car to move
+
+
+def driven_wheels(powertrain: str, drive_axle: str) -> tuple:
+    """Which wheels (front left, front right, rear left, rear right) the powertrain drives:
+    `ideal` all four, otherwise its `drive_axle` (rear, front or all)."""
+    if powertrain == "ideal" or drive_axle == "all":
+        return (True,) * 4
+    front = drive_axle == "front"
+    return (front, front, not front, not front)
+
+
+def release_sticky(drive, brake, velocity, gear, brake_floor, torque, driven):
+    """The torques PhysX gets: `drive` and `brake` as the onboard computers put them, unless
+    the car is in drive or reverse, asked to move (target `velocity` past MOVE_VELOCITY), with
+    no drive torque and every brake below `brake_floor` (released). Then `torque` N m on each
+    `driven` wheel, along the target's direction, and no brake: PhysX's sticky tyres hold a
+    standing car until a wheel gets drive torque, where a real car with its brakes released
+    rolls (issue 070). A target of 0 (stopping, parked) is left to the hold brake."""
+    if (torque <= 0 or gear not in (GEAR_DRIVE, GEAR_REVERSE) or abs(velocity) <= MOVE_VELOCITY
+            or any(d != 0.0 for d in drive) or any(b >= brake_floor for b in brake)):
+        return tuple(drive), tuple(brake)
+    sign = -1.0 if gear == GEAR_REVERSE else 1.0
+    return tuple(sign * torque if d else 0.0 for d in driven), (0.0,) * len(brake)
 
 
 @dataclass

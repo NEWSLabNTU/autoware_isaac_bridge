@@ -65,6 +65,11 @@ class VehicleParams:
     sticky_tire_threshold_time: float = 1.0
     longitudinal_sticky_tire_damping: float = 200.0
     lateral_sticky_tire_damping: float = 200.0
+    # PhysX leaves its sticky-tyre state only on drive torque: a car in gear asked to move,
+    # with no drive and its brakes released (below the onboard computers' brake_floor), gets
+    # this much on each driven wheel, so it can roll as a real one does (issue 070: a downhill
+    # start held for good; 1 N m is ~0.003 m/s^2 on a Model 3)
+    release_torque: float = 1.0  # N m per driven wheel
 
     @classmethod
     def from_dict(cls, values, overrides=None):

@@ -20,11 +20,16 @@ CSV of every frame goes to DIR, and a summary of the measurements to DIR/summary
 - `coast`:     100 km/h, then neutral: the road load's deceleration against the model's
 - `steps`:     at 10 m/s, +1.5 m/s^2 then -3 m/s^2 steps: the response's dead time and lag
 - `accel_brake`, `hard_brake`, `limit_brake`: scensim's step-response sequences (roadmap 043)
+- `start_down`, `start_flat`, `start_up`, `hold_down`, `hold_flat`: from rest on a slope (the
+  gravity tilted, downhill ahead), under one constant request: Autoware's downhill start
+  (-0.028 m/s^2 towards 0.25 m/s, which only the release torque lets roll; issue 070), the
+  same on the flat (a creep), an uphill start, and a target of 0 (held)
 """
 import argparse
 import csv
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -128,6 +133,15 @@ def _brake_from_15(decel):
     return cmd
 
 
+def constant(accel, velocity):
+    def cmd(t, v, memo):
+        return accel, velocity
+    return cmd
+
+
+# the slope tests: degrees, downhill ahead (+x); the others run on the flat
+SLOPE = {"start_down": 3.1, "start_up": -3.1, "hold_down": 3.1}
+
 TESTS = {
     "launch": (14.0, launch),
     "brake_100": (24.0, brake_100),
@@ -137,6 +151,11 @@ TESTS = {
     "accel_brake": (11.0, accel_brake),
     "hard_brake": (16.0, _brake_from_15(8.0)),
     "limit_brake": (16.0, _brake_from_15(12.0)),
+    "start_down": (10.0, constant(-0.028, 0.25)),
+    "start_flat": (20.0, constant(-0.028, 0.25)),
+    "start_up": (10.0, constant(0.6, 0.25)),
+    "hold_down": (10.0, constant(-1.0, 0.0)),
+    "hold_flat": (10.0, constant(0.0, 0.0)),
 }
 
 
@@ -227,6 +246,11 @@ def measure(test, rows):
                 t = _cross(rows, "a", base + frac * span, i0)
                 res[f"t{int(frac * 100)}_s"] = None if t is None else round(t - t0, 3)
             out[f"step_{req:+g}"] = res
+    if test in ("start_down", "start_flat", "start_up", "hold_down", "hold_flat"):
+        at5 = _first(rows, lambda r: r["t"] >= 5.0 - 1e-9)
+        out["v_5s"] = round(rows[at5]["v"], 4)
+        out["v_end"] = round(rows[-1]["v"], 4)
+        out["x_end"] = round(rows[-1]["x"], 4)
     if test in ("steps", "accel_brake", "hard_brake"):
         err = [abs(r["a"] - r["cmd_a"]) for r in rows if abs(r["cmd_a"]) > 0.2 and r["v"] > 1.0]
         out["mean_abs_accel_error"] = round(_mean(err), 3)
@@ -296,6 +320,8 @@ def main(argv=None):
     from isaacsim.core.api import World
     from isaacsim.core.utils.stage import add_reference_to_stage
 
+    from pxr import Gf, UsdPhysics
+
     from .isaac.vehicle import Vehicle, ensure_vehicle_scene
 
     dt = FRAME / SUB
@@ -306,6 +332,8 @@ def main(argv=None):
     else:
         world.scene.add_default_ground_plane()
     ensure_vehicle_scene(stage)
+    scene = next(UsdPhysics.Scene(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Scene))
+    gravity = scene.CreateGravityDirectionAttr()
     world.reset()
     world.play()
     physx = omni.physx.get_physx_interface()
@@ -320,6 +348,8 @@ def main(argv=None):
         for test, (length, command) in TESTS.items():
             if only and test not in only:
                 continue
+            th = math.radians(SLOPE.get(test, 0.0))
+            gravity.Set(Gf.Vec3f(math.sin(th), 0.0, -math.cos(th)))
             veh.teleport(pose, physx)
             state = State()
             cmd = Command(received=True, gear=GEAR_DRIVE)
