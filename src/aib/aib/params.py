@@ -63,7 +63,9 @@ class VehicleParams:
     # lies beyond the real travel, where the bump stop (aib.bump_stop) stops the wheel; the
     # sweep needs it (issues 029, 077: 0.50 m on the Model 3's 0.20)
     physx_travel: float = 0.0
-    bump_stop: float = 0.06  # m: the stop's engagement before full compression
+    # m: the stop's engagement before full compression, at most half the real travel (a
+    # small car's 3 cm travel takes 1.5 cm; scensim roadmap 091 W6)
+    bump_stop: float = 0.06
     bump_rate: float = 0.0  # N/m at full compression (0: 5 times the axle's spring)
     bump_damping: float = 0.5  # the stop's damping ratio at full compression, on the corner
     # PhysX vehicle integration
@@ -118,6 +120,10 @@ class VehicleParams:
         px = self.physx_travel or (SWEEP_TRAVEL * self.suspension_travel
                                    if self.wheel_query == "sweep" else 0.0)
         return max(px, self.suspension_travel), self.suspension_travel
+
+    def bump_engagement(self):
+        """The bump stop's engagement, m: `bump_stop`, at most half the real travel."""
+        return min(self.bump_stop, 0.5 * self.suspension_travel)
 
     def diagonal_inertia(self):
         lx, ly, lz = self.inertia_box

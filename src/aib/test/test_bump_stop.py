@@ -79,6 +79,12 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(VehicleParams(wheel_query="sweep", physx_travel=0.6).travels(),
                          (0.6, 0.2))
 
+    def test_the_engagement_is_at_most_half_the_travel(self):
+        self.assertEqual(VehicleParams().bump_engagement(), 0.06)  # the Model 3's 0.20 m
+        p = VehicleParams(wheel_query="sweep", suspension_travel=0.03)  # a 1/10 car's
+        self.assertEqual(p.bump_engagement(), 0.015)
+        BumpStop(p.travels()[1], p.bump_engagement(), 100.0)  # a stop it accepts
+
 
 if __name__ == "__main__":
     unittest.main()

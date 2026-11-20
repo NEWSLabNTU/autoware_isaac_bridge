@@ -195,7 +195,7 @@ class Vehicle:
             sprung = max(front_axle[0], rear_axle[0])
             rate = p.bump_rate or 5.0 * k_max
             # the stop's slope at full compression is 2 rate (aib.bump_stop)
-            self.bump = BumpStop(real_travel, p.bump_stop, rate,
+            self.bump = BumpStop(real_travel, p.bump_engagement(), rate,
                                  2.0 * p.bump_damping * math.sqrt(2.0 * rate * sprung))
         self.jounce = None  # per wheel after a step, m from full droop
         self.bump_forces = None  # per wheel, N, the last step's stop forces (for traces)
