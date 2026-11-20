@@ -96,3 +96,29 @@ class AgreesWithAutowareTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanarLidarTest(unittest.TestCase):
+    """scensim 091 W19: a spec's laser_scan lidar becomes a one-ring profile and a LaserScan
+    layout in the rig, which the sensor's settings accept."""
+
+    def test_a_laser_scan_lidar(self):
+        from aib.sensing import laser_scan_settings
+
+        doc = yaml.safe_load(SPEC.read_text())
+        top = doc["sensors"]["top"]
+        top.update(channels=1, vertical_fov=[0.0, 0.0], horizontal_fov=270.0, beams=1081,
+                   rate_hz=40.0, range=10.0, min_range=0.06, message="laser_scan", topic="/scan")
+        top.pop("carla", None)
+        with tempfile.TemporaryDirectory() as d:
+            spec_path = Path(d) / SPEC.name
+            spec_path.write_text(yaml.safe_dump(doc))
+            text = gen.rig(gen.specmod.load(spec_path), "x", "x")
+        isaac = yaml.safe_load(text)["sensors"]["top"]["isaac"]
+        prof, scan = isaac["profile"], isaac["laser_scan"]
+        self.assertEqual((prof["channels"], prof["columns"], prof["rate_hz"], prof["range"]),
+                         (1, 1440, 40.0, 10.0))
+        self.assertEqual(scan, {"angle_min_deg": -135.0, "angle_max_deg": 135.0, "beams": 1081,
+                                "range_min": 0.06, "topic": "/scan"})
+        s = laser_scan_settings(scan, prof)
+        self.assertEqual((s["beams"], s["topic"], s["range_max"]), (1081, "/scan", 10.0))

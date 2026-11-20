@@ -147,3 +147,16 @@ def test_phase_jitter_streams_differ_per_lidar_and_need_columns():
     assert c.next() == lp.PhaseJitter.of(p, "top").next()      # stable: crc32, not hash()
     with pytest.raises(ValueError, match="columns"):
         lp.PhaseJitter.of({"name": "x", "phase_jitter": {}}, "top")
+
+
+def test_a_planar_profile_has_one_ring():
+    """091 W19: a one-ring profile (UST-10LX class) checks and numbers its points."""
+    import numpy as np
+
+    from aib import lidar_profile as lp
+
+    p = {"channels": 1, "upper_fov": 0.0, "lower_fov": 0.0, "columns": 1440, "rate_hz": 40.0,
+         "range": 10.0}
+    assert lp.check(np.zeros(1000), p) is None
+    assert "off the plane" in lp.check(np.r_[np.zeros(900), np.full(100, 0.5)], p)
+    assert lp.rings(np.zeros(5), p).tolist() == [0] * 5

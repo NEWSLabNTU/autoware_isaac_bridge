@@ -134,6 +134,23 @@ the stack's workspace, built for Isaac's Python:
 AUTOWARE_PREFIX=<workspace>/install/vesc_msgs src/aib/scripts/build_msgs.sh vesc_msgs
 ```
 
+### A planar lidar
+
+A spec lidar with `message: laser_scan` (sim_vehicle_spec's `docs/spec-format.md`) is a planar
+scanner, such as a RoboRacer's Hokuyo UST-10LX. Isaac fires one ring of a full turn at the scan's
+step, and the ego publishes the scan's window as `sensor_msgs/LaserScan` on the sensor's topic,
+in urg_node's layout (`angle_min` to `angle_max` over `beams`, `range_min`, `range_max`, no
+intensities). Beams with no return, or a return out of range, are `+inf`. The QoS is
+urg_node's: reliable, depth 20.
+
+Checked in a walled room against the walls' distances from the sensor's true pose: 1080 of 1081
+beams within 1.5 mm (median 0.04 mm). The beams that missed hit the room's corners, where its
+walls meet.
+
+The scan goes out once per frame, a whole revolution each time. A scanner faster than the
+frames (40 Hz under 20 Hz frames) is published at the frame rate. At 40 frames a second a
+40 Hz revolution splits across frames, so do not raise the frame rate to match it.
+
 ### Time
 
 The ego stamps `/clock` and every message with `sim_ns = nanos(sim seconds) + BASE_NS`

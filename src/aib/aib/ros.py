@@ -74,7 +74,7 @@ class EgoRos:
         from rclpy.executors import SingleThreadedExecutor
         from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from rosgraph_msgs.msg import Clock
-        from sensor_msgs.msg import (CameraInfo, Image, Imu, NavSatFix, NavSatStatus,
+        from sensor_msgs.msg import (CameraInfo, Image, Imu, LaserScan, NavSatFix, NavSatStatus,
                                      PointCloud2, PointField)
 
         self.m = dict(Clock=Clock, VelocityReport=VelocityReport, SteeringReport=SteeringReport,
@@ -82,7 +82,7 @@ class EgoRos:
                       TurnIndicatorsReport=TurnIndicatorsReport,
                       HazardLightsReport=HazardLightsReport, Imu=Imu, NavSatFix=NavSatFix,
                       NavSatStatus=NavSatStatus, PointCloud2=PointCloud2, PointField=PointField,
-                      Image=Image, CameraInfo=CameraInfo)
+                      Image=Image, CameraInfo=CameraInfo, LaserScan=LaserScan)
         self.domain = domain
         self.ctx = Context()
         rclpy.init(context=self.ctx, domain_id=domain)
@@ -278,6 +278,13 @@ class EgoRos:
         kind = {"lidar": "PointCloud2", "imu": "Imu", "gnss": "NavSatFix", "camera": "Image"}[s.type]
         qos = self.sensor_qos if s.type in ("lidar", "camera") else self.reliable
         topic = s.topic or DEFAULT_TOPICS.get(s.type, "")
+        if s.type == "lidar" and s.isaac.get("laser_scan"):
+            # a planar lidar as its driver publishes it (aib.sensing.laser_scan_settings):
+            # urg_node's QoS, reliable, depth 20, which a default subscriber matches
+            from rclpy.qos import QoSProfile
+
+            kind, topic = "LaserScan", s.isaac["laser_scan"].get("topic", "/scan")
+            qos = QoSProfile(depth=20)
         if topic not in self._sensor_pubs:
             self._sensor_pubs[topic] = self.node.create_publisher(self.m[kind], topic, qos)
         info = None

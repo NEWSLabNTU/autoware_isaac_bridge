@@ -233,3 +233,56 @@ class Periodic:
 
     def reset(self):
         self.next = 0.0
+
+
+LASER_SCAN_KEYS = ("angle_min_deg", "angle_max_deg", "beams", "range_min", "range_max", "topic")
+
+
+def laser_scan_settings(ls, profile):
+    """A planar lidar's LaserScan layout (the rig's `isaac.laser_scan`; scensim roadmap 091
+    W19) over its one-ring profile: `angle_min_deg` and `angle_max_deg` (the scan's first and
+    last beam, + left of x), `beams` across them (inclusive, as urg_node counts a UST-10LX's
+    1081 over 270 deg), `range_min` and `range_max` (m; default the profile's range). The
+    profile fires `columns` over 360 deg; each beam must land on a column, so the step
+    (max - min) / (beams - 1) must be 360 / columns. ValueError otherwise."""
+    import math
+
+    unknown = set(ls) - set(LASER_SCAN_KEYS)
+    if unknown:
+        raise ValueError(f"laser_scan: unknown key(s) {sorted(unknown)}")
+    if not profile or int(profile.get("channels", 0)) != 1:
+        raise ValueError("laser_scan needs a one-ring lidar profile (channels: 1)")
+    lo, hi, n = float(ls["angle_min_deg"]), float(ls["angle_max_deg"]), int(ls["beams"])
+    if not (hi > lo and n >= 2 and hi - lo <= 360.0):
+        raise ValueError(f"laser_scan: {lo}..{hi} deg in {n} beams is not a scan")
+    step = (hi - lo) / (n - 1)
+    column = 360.0 / float(profile["columns"])
+    if abs(step - column) > 1e-6 * column:
+        raise ValueError(f"laser_scan: a beam every {step:g} deg, but the profile fires a column "
+                         f"every {column:g} deg (columns {profile['columns']}): make them equal")
+    return {"angle_min": math.radians(lo), "angle_max": math.radians(hi),
+            "angle_increment": math.radians(step), "beams": n,
+            "range_min": float(ls.get("range_min", 0.0)),
+            "range_max": float(ls.get("range_max", profile["range"])),
+            "scan_time": 1.0 / float(profile["rate_hz"]),
+            "time_increment": 1.0 / (float(profile["rate_hz"]) * float(profile["columns"])),
+            "topic": ls.get("topic", "/scan")}
+
+
+def laser_scan_ranges(xyz, s):
+    """A one-ring scan's points (N x 3, sensor frame) as LaserScan ranges for layout `s`
+    (laser_scan_settings): each point to the beam nearest its azimuth, its planar distance;
+    the nearest of a beam's points; beams outside the layout's angles dropped; no return, or
+    one outside [range_min, range_max]: +inf (REP 117)."""
+    import numpy as np
+
+    p = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+    out = np.full(s["beams"], np.inf)
+    if not len(p):
+        return out
+    r = np.hypot(p[:, 0], p[:, 1])
+    a = np.arctan2(p[:, 1], p[:, 0])
+    i = np.rint((a - s["angle_min"]) / s["angle_increment"]).astype(np.int64)
+    ok = (i >= 0) & (i < s["beams"]) & (r >= s["range_min"]) & (r <= s["range_max"])
+    np.minimum.at(out, i[ok], r[ok])
+    return out

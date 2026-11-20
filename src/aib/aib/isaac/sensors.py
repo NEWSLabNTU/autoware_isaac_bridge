@@ -17,8 +17,8 @@ from .. import intensity as intensitymod
 from .. import lidar_profile as lidarprof
 from ..frames import advance, compose, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
-                       gnss_reading, imu_reading, motion_distort, pack_cloud, point_times,
-                       sample_index)
+                       gnss_reading, imu_reading, laser_scan_ranges, laser_scan_settings,
+                       motion_distort, pack_cloud, point_times, sample_index)
 
 log = logging.getLogger("aib")
 
@@ -175,6 +175,9 @@ class Lidar:
         if self.jitter:
             log.info("lidar %s: column phase drifts within %.3f deg a scan (seed %d)", rig.name,
                      self.jitter.column, self.jitter.seed)
+        # a planar lidar published as LaserScan (scensim 091 W19): its layout over the profile
+        ls = rig.isaac.get("laser_scan")
+        self.scan = laser_scan_settings(ls, self.profile) if ls else None
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
@@ -284,6 +287,8 @@ class Lidar:
             xyz = lidarprof.unturn(xyz, self.deltas[0])  # the prim was turned by this scan's phase
         if self.q_emit != (1.0, 0.0, 0.0, 0.0):
             xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3) @ _matrix(self.q_emit).T
+        if self.scan is not None:
+            return self._scan_msg(xyz, stamp)
         n, data = pack_cloud(xyz, inten, info.get("elevation"), self.channels,
                              fmt=self.point_format, rings=self.rings, time_stamp=offsets,
                              ring=ring)
@@ -304,6 +309,20 @@ class Lidar:
         msg.is_dense = True
         # array.array, not bytes: rclpy copies an array in C, bytes element by element (40 ms)
         msg.data = array.array("B", data)
+        return msg
+
+    def _scan_msg(self, xyz, stamp):
+        """The revolution as a planar lidar's driver publishes it: sensor_msgs/LaserScan in
+        the rig's layout (aib.sensing.laser_scan_ranges), no intensities."""
+        s = self.scan
+        msg = self.ros.m["LaserScan"]()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.rig.frame
+        msg.angle_min, msg.angle_max = s["angle_min"], s["angle_max"]
+        msg.angle_increment = s["angle_increment"]
+        msg.time_increment, msg.scan_time = s["time_increment"], s["scan_time"]
+        msg.range_min, msg.range_max = s["range_min"], s["range_max"]
+        msg.ranges = array.array("f", laser_scan_ranges(xyz, s).astype("float32").tobytes())
         return msg
 
     def _spec_intensity(self, xyz, info, n_pts):

@@ -41,6 +41,25 @@ def profile(attrs, name):
             "range": float(attrs["range"])}
 
 
+def planar(sensor, name):
+    """A planar scanner's (the spec's `message: laser_scan`; scensim 091 W19) profile and
+    LaserScan layout: one ring at its elevation, a full turn of columns at the scan's step
+    (sim_vehicle_spec's planar_columns), and the scan's window centred on the sensor's x, as
+    `isaac.profile` and `isaac.laser_scan` (aib.sensing.laser_scan_settings)."""
+    hfov, beams = float(sensor["horizontal_fov"]), int(sensor["beams"])
+    columns = (beams - 1) * 360.0 / hfov
+    if abs(columns - round(columns)) > 1e-6:
+        raise ValueError(f"lidar {name}: {beams} beams over {hfov:g} deg do not divide a turn "
+                         "into whole columns")
+    elev = float(sensor["vertical_fov"][0])
+    prof = {"name": name, "channels": 1, "upper_fov": elev, "lower_fov": elev,
+            "columns": int(round(columns)), "rate_hz": float(sensor["rate_hz"]),
+            "range": float(sensor["range"])}
+    scan = {"angle_min_deg": -hfov / 2, "angle_max_deg": hfov / 2, "beams": beams,
+            "range_min": float(sensor.get("min_range", 0.0)), "topic": sensor["topic"]}
+    return prof, scan
+
+
 def elevations(p):
     """Each ring's elevation in degrees, ring 0 the highest, as CARLA fires them."""
     return np.linspace(p["upper_fov"], p["lower_fov"], p["channels"]).tolist()
@@ -87,6 +106,8 @@ def attributes(p):
 def rings(elevation_deg, p):
     """Each point's ring from its elevation (degrees), counted from the lowest (0) as aib
     numbers them; independent of which rings a scan happens to have returns on."""
+    if p["channels"] == 1:  # a planar lidar: one ring
+        return np.zeros(len(np.asarray(elevation_deg).reshape(-1)), np.uint16)
     step = (p["upper_fov"] - p["lower_fov"]) / (p["channels"] - 1)
     r = np.rint((np.asarray(elevation_deg, dtype=np.float64) - p["lower_fov"]) / step)
     return np.clip(r, 0, p["channels"] - 1).astype(np.uint16)
@@ -102,6 +123,14 @@ def check(elevation_deg, p, tol=None):
     e = np.asarray(elevation_deg, dtype=np.float64).reshape(-1)
     if len(e) == 0:
         return "no points"
+    if p["channels"] == 1:
+        # a planar lidar (091 W19): every point on its one ring, within a hundredth of a degree
+        tol = 0.01 if tol is None else tol
+        bad = np.abs(e - p["upper_fov"]) > tol
+        if bad.mean() > 0.01:
+            return (f"{100 * bad.mean():.1f} % of points off the plane at {p['upper_fov']:g} deg "
+                    f"by more than {tol:g} deg (elevations {e.min():.3f}..{e.max():.3f} deg)")
+        return None
     step = (p["upper_fov"] - p["lower_fov"]) / (p["channels"] - 1)
     tol = step / 4 if tol is None else tol
     idx = (e - p["lower_fov"]) / step

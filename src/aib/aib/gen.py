@@ -110,7 +110,11 @@ def rig(spec, header, spec_rel):
         # A lidar's firing pattern (084b): CARLA's, from the attributes the spec generates for
         # it (rings even over the vertical FOV, no drop-off), unless the spec names a USD of
         # its own; named by spec_hash so Kit never serves a profile of another spec.
-        if s["type"] == "lidar" and s.get("carla") and not (s["isaac"] or {}).get("usd"):
+        if s["type"] == "lidar" and s.get("message") == "laser_scan":
+            # a planar scanner (091 W19): one ring, a full turn of columns, LaserScan out
+            prof, scan = lidarprof.planar(s, f"spec_{specmod.spec_hash(spec)[:12]}_{name}")
+            entry["isaac"] = dict(entry.get("isaac") or {}, profile=prof, laser_scan=scan)
+        elif s["type"] == "lidar" and s.get("carla") and not (s["isaac"] or {}).get("usd"):
             prof = lidarprof.profile(specgen.carla_attributes(s),
                                      f"spec_{specmod.spec_hash(spec)[:12]}_{name}")
             if prof:

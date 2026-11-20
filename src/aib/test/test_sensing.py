@@ -308,3 +308,32 @@ class ImuRateTest(unittest.TestCase):
         self.assertEqual(sample_index(t, 0.01), 1)
         self.assertEqual(sample_index(t, 0.0125), 2)
         self.assertEqual(sample_index(t, 0.5), 3)
+
+
+def test_a_planar_lidar_bins_into_urg_node_s_layout():
+    """091 W19: a UST-10LX class scan, 1081 beams over 270 deg from a ring of 1440 columns."""
+    import math
+
+    import numpy as np
+    import pytest
+
+    from aib.sensing import laser_scan_ranges, laser_scan_settings
+
+    prof = {"channels": 1, "columns": 1440, "rate_hz": 40.0, "range": 10.0}
+    s = laser_scan_settings({"angle_min_deg": -135, "angle_max_deg": 135, "beams": 1081,
+                             "range_min": 0.06}, prof)
+    assert s["beams"] == 1081 and abs(s["angle_increment"] - math.radians(0.25)) < 1e-12
+    assert abs(s["time_increment"] - 1 / (40 * 1440)) < 1e-15 and s["range_max"] == 10.0
+    # a wall 2 m ahead (x = 2), a post 0.5 m to the left, one point behind (outside the scan)
+    pts = [(2.0, 2.0 * math.tan(math.radians(a)), 0.0) for a in (-10.0, 0.0, 10.0)]
+    pts += [(0.0, 0.5, 0.01), (-1.0, 0.0, 0.0), (0.03, 0.0, 0.0), (20.0, 0.1, 0.0)]
+    r = laser_scan_ranges(pts, s)
+    centre = 540  # 0 deg
+    assert r[centre] == 2.0 and abs(r[centre - 40] - 2.0 / math.cos(math.radians(10))) < 1e-12
+    assert r[centre + 360] == 0.5  # +90 deg
+    assert np.isinf(r).sum() == 1081 - 4  # behind, too near and too far are no returns
+    with pytest.raises(ValueError, match="make them equal"):
+        laser_scan_settings({"angle_min_deg": -135, "angle_max_deg": 135, "beams": 1000}, prof)
+    with pytest.raises(ValueError, match="one-ring"):
+        laser_scan_settings({"angle_min_deg": -135, "angle_max_deg": 135, "beams": 1081},
+                            {**prof, "channels": 16})
