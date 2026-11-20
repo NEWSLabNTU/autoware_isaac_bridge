@@ -42,7 +42,9 @@ class Ego:
         self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.make_component(),
                                box_center or rig.box_center, box_dims or rig.box_dims, pose,
                                ground_clearance=rig.ground_clearance,
-                               truth_settings=rig.component.get("truth"))
+                               truth_settings=rig.component.get("truth"),
+                               interface=ros.profile)
+        self.now = 0.0  # simulation time, s: the last frame's end plus this frame's substeps
         self.state = State()
         self.map_origin = projector.origin if projector is not None else (0.0, 0.0, 0.0)
         self.vehicle.map_origin = self.map_origin
@@ -76,10 +78,12 @@ class Ego:
     # --- the frame -------------------------------------------------------------------------
 
     def take_commands(self):
+        self.ros.now = self.now  # the commands that arrive now arrive at the frame's start
         self.ros.take_commands()
 
     def before_substep(self, dt):
-        self.vehicle.apply(self.ros.cmd, dt, self.state)
+        self.vehicle.apply(self.ros.command(self.now), dt, self.state)
+        self.now += dt
         for s in self.sensors:
             s.before_substep(self.vehicle, self.state, dt)
 
@@ -90,8 +94,14 @@ class Ego:
         self.vehicle.teleport(pose, physx)
 
     def publish(self, sim_time, stamp):
-        """Everything Autoware gets for this frame but `/clock` (the host's), at `stamp`."""
-        self.ros.publish_status(self.state, stamp)
+        """Everything the stack gets for this frame but `/clock` (the host's), at `stamp`."""
+        self.now = sim_time
+        torques = getattr(self.vehicle, "torques", None)
+        self.ros.telemetry = getattr(torques, "telemetry", None)
+        ws = self.vehicle.wheel_states
+        self.ros.publish_status(self.state, stamp,
+                                None if ws is None else tuple(w.rotation_speed for w in ws),
+                                self.vehicle.driven)
         if self.ros.ground_truth:
             self.ros.publish_ground_truth(ground_truth(self.state, self.map_origin), stamp)
         for s in self.sensors:

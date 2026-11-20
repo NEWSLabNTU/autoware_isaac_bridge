@@ -44,6 +44,7 @@ rebuilt for it (scripts/build_msgs.sh); nothing here is imported by the pure mod
 import logging
 
 from .control import Command, gear_from_command
+from .interfaces import interface_settings
 
 log = logging.getLogger("aib")
 
@@ -60,7 +61,8 @@ DEFAULT_TOPICS = {
 
 class EgoRos:
     def __init__(self, domain=1, rig=None, node_name="isaac_vehicle",
-                 control_topic="/control/command/control_cmd", lockstep=None, ground_truth=None):
+                 control_topic="/control/command/control_cmd", lockstep=None, ground_truth=None,
+                 vehicle_interface=None):
         import rclpy
         from autoware_control_msgs.msg import Control
         from autoware_vehicle_msgs.msg import (ControlModeReport, GearCommand, GearReport,
@@ -90,6 +92,28 @@ class EgoRos:
         self.reliable = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         self.sensor_qos = qos_profile_sensor_data
         n, reliable = self.node, self.reliable
+        self.interface = interface_settings(vehicle_interface)
+        self.profile = self.interface["profile"]
+        self.now = 0.0  # the host's simulation time, s: the commands' arrival (aib.interfaces)
+        if self.profile != "autoware":
+            if lockstep:
+                raise ValueError(f"lockstep waits for Autoware's localizer; the {self.profile} "
+                                 "vehicle interface has none: drop the lockstep")
+            self.pub = {"clock": n.create_publisher(Clock, "/clock", 10)}
+            self._sensor_pubs = {}
+            self._signals_pub = None
+            if rig is not None:
+                for s in rig.sensors.values():
+                    if s.enabled:
+                        self.sensor_publisher(s)
+            self._make_interface(rig)
+            self.lockstep = None
+            self.reset()
+            self.ground_truth = {}
+            if ground_truth:
+                self._make_ground_truth(ground_truth)
+            log.info("ego ROS 2 side on domain %d, the %s vehicle interface", domain, self.profile)
+            return
         self.pub = {
             "clock": n.create_publisher(Clock, "/clock", 10),
             "velocity": n.create_publisher(VelocityReport, "/vehicle/status/velocity_status", reliable),
@@ -157,7 +181,15 @@ class EgoRos:
             log.info("lockstep: each frame waits up to %.2f s for a pose on %s",
                      self.lockstep["timeout_s"], self.lockstep["topic"])
         self._reset_lockstep()
-        self.ground_truth = dict(ground_truth or {})
+        self.ground_truth = {}
+        if ground_truth:
+            self._make_ground_truth(ground_truth)
+        log.info("ego ROS 2 side on domain %d", domain)
+
+    def _make_ground_truth(self, ground_truth):
+        """base_link's ground truth publishers (the ego config's `ground_truth`)."""
+        n, reliable = self.node, self.reliable
+        self.ground_truth = dict(ground_truth)
         if self.ground_truth:
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import Odometry
@@ -174,13 +206,71 @@ class EgoRos:
             log.info("ground truth on %s%s", self.ground_truth["topic"],
                      f", and as the pose estimate on {POSE_ESTIMATE_TOPIC}"
                      if self.ground_truth["pose_estimate"] else "")
-        log.info("ego ROS 2 side on domain %d", domain)
+
+    def _topic(self, name):
+        """A profile's topic: a relative name under the interface's namespace (as the VESC
+        driver's), then the interface's remap."""
+        ns = self.interface["namespace"].strip("/")
+        full = name if name.startswith("/") else "/" + "/".join(x for x in (ns, name) if x)
+        return self.interface["remap"].get(full, full)
+
+    def _make_interface(self, rig):
+        """The `ackermann` or `vesc` profile's topics (aib.interfaces)."""
+        from . import interfaces as itf
+
+        n, reliable = self.node, self.reliable
+        if self.profile == "ackermann":
+            from ackermann_msgs.msg import AckermannDriveStamped
+            from nav_msgs.msg import Odometry
+            from tf2_msgs.msg import TFMessage
+            from geometry_msgs.msg import TransformStamped
+
+            self.m.update(Odometry=Odometry, TFMessage=TFMessage, TransformStamped=TransformStamped)
+            self.input = itf.AckermannInput()
+            wheelbase = self.interface.get("wheelbase") or (rig.vehicle.wheel_base if rig else None)
+            self.odometer = itf.Odometer(wheelbase)
+            self._radius = rig.vehicle.wheel_radius if rig else None
+
+            def on_drive(msg):
+                d = msg.drive
+                self.input.on_drive(self.now, d.speed, d.acceleration, d.jerk, d.steering_angle,
+                                    d.steering_angle_velocity)
+
+            n.create_subscription(AckermannDriveStamped, self._topic("/drive"), on_drive, reliable)
+            self.pub["odom"] = n.create_publisher(Odometry, self._topic("/odom"), 10)
+            self.pub["tf"] = n.create_publisher(TFMessage, "/tf", 10)
+        else:
+            from std_msgs.msg import Float64
+            try:
+                from vesc_msgs.msg import VescStateStamped
+            except ImportError as e:
+                raise ImportError("the vesc vehicle interface needs vesc_msgs built for Isaac's "
+                                  "Python: src/aib/scripts/build_msgs.sh vesc_msgs, with "
+                                  "AUTOWARE_PREFIX the vesc_msgs install of the stack's workspace "
+                                  f"(<ws>/install/vesc_msgs) ({e})") from e
+            self.m.update(Float64=Float64, VescStateStamped=VescStateStamped)
+            self.input = itf.VescInput(self.interface.get("limits"))
+            for topic in itf.MOTOR_TOPICS:
+                def on_motor(msg, topic=topic):
+                    self.input.on_motor(self.now, topic, msg.data)
+
+                n.create_subscription(Float64, self._topic(f"commands/motor/{topic}"), on_motor,
+                                      10)
+            echo = n.create_publisher(Float64, self._topic("sensors/servo_position_command"), 10)
+
+            def on_servo(msg):
+                echo.publish(Float64(data=self.input.on_servo(msg.data)))
+
+            n.create_subscription(Float64, self._topic("commands/servo/position"), on_servo, 10)
+            self.pub["core"] = n.create_publisher(VescStateStamped, self._topic("sensors/core"),
+                                                  10)
+        self.telemetry = None
 
     @classmethod
     def from_config(cls, cfg, rig=None):
         return cls(domain=cfg.domain, rig=rig, node_name=cfg.node_name,
                    control_topic=cfg.control_topic, lockstep=cfg.lockstep,
-                   ground_truth=cfg.ground_truth)
+                   ground_truth=cfg.ground_truth, vehicle_interface=cfg.vehicle_interface)
 
     def sensor_publisher(self, s):
         """The publisher(s) for a SensorRig, made on first use: (main, info or None)."""
@@ -200,6 +290,10 @@ class EgoRos:
     def reset(self):
         """A new ego starts from no command: standing, in drive."""
         self.cmd = Command()
+        if self.profile != "autoware":
+            self.input.reset()
+            if self.profile == "ackermann":
+                self.odometer.reset()
         self.turn = 1  # TurnIndicatorsReport.DISABLE
         self.hazard = 1  # HazardLightsReport.DISABLE
         self._reset_lockstep()
@@ -272,6 +366,11 @@ class EgoRos:
         for _ in range(MAX_CALLBACKS_PER_FRAME):
             self.executor.spin_once(timeout_sec=0)
 
+    def command(self, now):
+        """What the vehicle takes at simulation time `now` (s): Autoware's `Command`, or the
+        profile's `AckermannCommand` / `VescCommand` with its age."""
+        return self.cmd if self.profile == "autoware" else self.input.command(now)
+
     @staticmethod
     def stamp(sim_time):
         """The ROS time of `sim_time` s: nanos(sim_time) + BASE_NS."""
@@ -282,8 +381,14 @@ class EgoRos:
         ns = sim_ns(sim_time)
         return Time(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000)
 
-    def publish_status(self, state, stamp):
-        """Autoware's vehicle status for one frame."""
+    def publish_status(self, state, stamp, wheel_speeds=None, driven=None):
+        """The vehicle interface's status for one frame: Autoware's reports, the `ackermann`
+        profile's odometry (from the driven wheels' `wheel_speeds`, rad/s, and the tire angle),
+        or the `vesc` profile's `sensors/core` (the component's last telemetry, `telemetry`)."""
+        if self.profile == "ackermann":
+            return self._publish_odom(state, stamp, wheel_speeds, driven)
+        if self.profile == "vesc":
+            return self._publish_core(stamp)
         m, pub = self.m, self.pub
         v = m["VelocityReport"]()
         v.header.stamp = stamp
@@ -312,6 +417,49 @@ class EgoRos:
         hz.stamp = stamp
         hz.report = self.hazard
         pub["hazard"].publish(hz)
+
+    def _publish_odom(self, state, stamp, wheel_speeds, driven):
+        """`/odom` and tf odom -> base_link, by vesc_to_odom's kinematics on the driven wheels'
+        rolling speed and the tire angle (aib.interfaces.Odometer)."""
+        import math
+
+        from .interfaces import rolling_speed
+
+        speed = (rolling_speed(wheel_speeds, self._radius, driven or (True,) * 4)
+                 if wheel_speeds is not None and self._radius else float(state.velocity[0]))
+        t = stamp.sec + stamp.nanosec * 1e-9
+        x, y, yaw, v, w = self.odometer.update(t, speed, state.tire_angle)
+        qz, qw = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
+        frames = self.interface["frames"]
+        o = self.m["Odometry"]()
+        o.header.stamp = stamp
+        o.header.frame_id = frames["odom"]
+        o.child_frame_id = frames["base"]
+        o.pose.pose.position.x, o.pose.pose.position.y = x, y
+        o.pose.pose.orientation.z, o.pose.pose.orientation.w = qz, qw
+        o.pose.covariance[0] = o.pose.covariance[7] = 0.2  # as vesc_to_odom
+        o.pose.covariance[35] = 0.4
+        o.twist.twist.linear.x = v
+        o.twist.twist.angular.z = w
+        self.pub["odom"].publish(o)
+        if self.interface["publish_tf"]:
+            tf = self.m["TransformStamped"]()
+            tf.header.stamp = stamp
+            tf.header.frame_id = frames["odom"]
+            tf.child_frame_id = frames["base"]
+            tf.transform.translation.x, tf.transform.translation.y = x, y
+            tf.transform.rotation = o.pose.pose.orientation
+            self.pub["tf"].publish(self.m["TFMessage"](transforms=[tf]))
+
+    def _publish_core(self, stamp):
+        """`sensors/core` from the component's last telemetry (aib.interfaces.vesc_state)."""
+        from .interfaces import vesc_state
+
+        msg = self.m["VescStateStamped"]()
+        msg.header.stamp = stamp
+        for k, v in vesc_state(self.telemetry).items():
+            setattr(msg.state, k, v)
+        self.pub["core"].publish(msg)
 
     def publish_ground_truth(self, gt, stamp):
         """base_link's ground truth (aib.sensing.ground_truth) for one frame, when on."""

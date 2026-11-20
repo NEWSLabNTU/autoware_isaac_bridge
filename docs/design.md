@@ -40,7 +40,8 @@ Autoware (ROS domain N) <── /vehicle/status/*, /clock, sensors ── Ego (a
 | `aib.frames` | - | quaternions, URDF rpy, transforms, the GNSS projector (MGRS or TransverseMercator at 0, 0) |
 | `aib.sensing` | numpy | IMU and GNSS readings from the state, the PointCloud2 layout, periodic timers |
 | `aib.rig` | yaml | `Rig`, `SensorRig`, `EgoConfig` |
-| `aib.ros` | Isaac's rclpy + Autoware msgs | `EgoRos`: the vehicle interface, the sensor publishers and the host's traffic signals on one domain |
+| `aib.interfaces` | sim_vehicle_ecu | the `ackermann` and `vesc` vehicle interfaces without ROS: the VESC driver's limits, the commands with their age, `vesc_to_odom`'s odometry, the telemetry as `VescState` |
+| `aib.ros` | Isaac's rclpy + Autoware msgs (`ackermann_msgs`, `vesc_msgs` for those profiles) | `EgoRos`: the vehicle interface, the sensor publishers and the host's traffic signals on one domain |
 | `aib.signals` | - | a signal colour as Autoware's `TrafficLightElement` (V2X input, as acb's publisher) |
 | `aib.isaac.vehicle` | Isaac | the PhysX vehicle ("drive none"): build, apply, sample, teleport |
 | `aib.isaac.sensors` | Isaac | RTX lidar, RGB camera, IMU, GNSS |

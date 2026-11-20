@@ -9,6 +9,10 @@
 # $ISAAC_ROOT/msgs (`isaac_env.sh` adds it to PYTHONPATH and LD_LIBRARY_PATH).
 #
 #     src/aib/scripts/build_msgs.sh [package...]
+#
+# AUTOWARE_PREFIX is where the packages are installed (default Autoware's). A package of
+# another workspace names its own colcon install, e.g. the vesc vehicle interface's
+# (scensim roadmap 091): AUTOWARE_PREFIX=<ws>/install/vesc_msgs build_msgs.sh vesc_msgs
 set -euo pipefail
 I=${ISAAC_ROOT:?ISAAC_ROOT is not set: it names Isaac Sim 6.1\'s pip install; set it (scensim: isaac.root in ~/.config/scensim/host.yaml)}
 PREFIX=${AUTOWARE_PREFIX:-/opt/autoware/1.5.0}

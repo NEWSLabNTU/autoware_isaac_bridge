@@ -106,6 +106,34 @@ interface on the ego config's ROS domain, then runs autoware_sim_vehicle's `vehi
 (default `play_log/vehicle_check/<time>/`), prints PASS or FAIL with what failed, and exits 0
 only on PASS.
 
+### The vehicle interface
+
+The ego config's `vehicle_interface` picks the stack the ego faces (`aib.interfaces`, scensim
+roadmap 091). Each profile hands the car's control component its own command type, and a
+component that takes another is refused.
+
+| `profile` | takes | publishes |
+|---|---|---|
+| `autoware` (the default) | Autoware's `/control/command/*` | `/vehicle/status/*` |
+| `ackermann` | `/drive` (`AckermannDriveStamped`) | `/odom` and tf `odom` to `base_link`, by `vesc_to_odom`'s kinematics on the driven wheels and the tire angle |
+| `vesc` | the VESC driver's `commands/motor/*` and `commands/servo/position` | `sensors/core` (the component's telemetry, each frame) and `sensors/servo_position_command` (the clipped servo command, at once) |
+
+The `vesc` profile is f1tenth's `vesc_driver_node`, so a stack's own `ackermann_to_vesc` and
+`vesc_to_odom` run unchanged on it. Its other keys:
+
+- `limits`: the driver's `<name>: [min, max]`, from the stack's `vesc.yaml`. Each command is
+  clipped to these, as the driver does. The defaults are f1tenth_system's.
+- `namespace`: a prefix for the driver's relative topic names.
+- `remap`: `{topic: topic}`, for any profile's topics.
+
+The `ackermann` profile's odometry has keys too: `wheelbase` (default: the rig's), `frames`
+(`odom` and `base`) and `publish_tf`. Isaac bundles `ackermann_msgs`. `vesc_msgs` comes from
+the stack's workspace, built for Isaac's Python:
+
+```bash
+AUTOWARE_PREFIX=<workspace>/install/vesc_msgs src/aib/scripts/build_msgs.sh vesc_msgs
+```
+
 ### Time
 
 The ego stamps `/clock` and every message with `sim_ns = nanos(sim seconds) + BASE_NS`

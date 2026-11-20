@@ -49,12 +49,14 @@ from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 from ..bump_stop import BumpStop
 from ..control import Command, State, ackermann, release_sticky, truth_values
 from ..deps import use
+from ..interfaces import COMMANDS
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams, road_load
 
 use("sim_vehicle_ecu")
 
 from sim_vehicle_ecu import Calibration, Request, Sensors  # noqa: E402
+from sim_vehicle_ecu.signals import GEAR_DRIVE, GEAR_REVERSE, AckermannCommand  # noqa: E402
 from sim_vehicle_ecu import component as components  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
@@ -105,23 +107,25 @@ def ensure_vehicle_scene(stage):
 
 class Vehicle:
     def __init__(self, stage, path, params: VehicleParams, component, box_center,
-                 box_dims, pose, ground_clearance=0.0, truth_settings=None, truth_seed=0):
+                 box_dims, pose, ground_clearance=0.0, truth_settings=None, truth_seed=0,
+                 interface="autoware"):
         """`params`: the PhysX vehicle (a rig's `vehicle`); `component`: its control component
         (scensim roadmap 091: a rig's `make_component()`, sim_vehicle_ecu's interface), or a
         `Calibration` for the shipped onboard computers on it; `ground_clearance`: the
         underbody's height (a rig's), where a skid plate goes (0: none); `truth_settings`:
         {input: {latency_s, noise_std}} for the ground truth the component declares, and
-        `truth_seed` its noise's seed."""
+        `truth_seed` its noise's seed; `interface`: the vehicle interface's profile
+        (aib.interfaces), whose commands the component must take."""
         self.stage = stage
         self.path = path
         self.p = p = params
         if isinstance(component, Calibration):
             component = components.EcuComponent.from_calibration(component)
         components.check(component)
-        if component.commands != "autoware":
-            raise ValueError(f"control component takes {component.commands!r} commands; this "
-                             "vehicle interface gives Autoware's (the others come with scensim "
-                             "roadmap 091 step 5)")
+        if component.commands != COMMANDS[interface]:
+            raise ValueError(f"control component takes {component.commands!r} commands; the "
+                             f"{interface} vehicle interface gives {COMMANDS[interface]!r} ones: "
+                             "set the ego config's vehicle_interface.profile to match")
         if not hasattr(component, "debug"):
             component.debug = {}  # what the recorder reads of the shipped ones
         self.ecu = component  # the name the hosts read (`debug`) and reset
@@ -341,7 +345,15 @@ class Vehicle:
         """One physics step's actuation: the vehicle interface's `cmd` as the by-wire request,
         the car's sensors as the last step left them, through the onboard computers."""
         p = self.p
-        request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
+        if isinstance(cmd, Command):  # Autoware's: the by-wire request
+            request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
+            velocity, gear = cmd.velocity, cmd.gear
+        elif isinstance(cmd, AckermannCommand):  # the component reads it as it is
+            request = cmd
+            velocity = cmd.speed if cmd.age < math.inf else 0.0
+            gear = GEAR_REVERSE if velocity < 0 else GEAR_DRIVE
+        else:  # VescCommand: what moves the car is the component's alone (no release)
+            request, velocity, gear = cmd, 0.0, GEAR_DRIVE
         self.torques = act = components.checked(self.ecu.step(request, self.sensors(state), dt))
         self.t += dt
         self.tire_angle = act.tire_angle
@@ -350,7 +362,7 @@ class Vehicle:
         else:
             left = right = self.tire_angle
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
-        drives, brakes = release_sticky(act.drive, act.brake, cmd.velocity, cmd.gear,
+        drives, brakes = release_sticky(act.drive, act.brake, velocity, gear,
                                         self.brake_floor, p.release_torque, self.driven)
         for (_, d, b, s), drive, brake, angle in zip(self.wheels, drives, brakes, angles):
             d.Set(drive)

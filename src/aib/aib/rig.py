@@ -208,6 +208,10 @@ class EgoConfig:
     # the same pose as NDT's PoseWithCovarianceStamped (POSE_ESTIMATE_TOPIC, `covariance`:
     # position m^2, angle rad^2), so Autoware under the profile's ndt:=none drives on it.
     ground_truth: dict = field(default_factory=dict)
+    # The ego's vehicle interface, its ROS face for the stack (scensim roadmap 091 W18;
+    # aib.interfaces): {} Autoware's; {profile: ackermann | vesc, namespace, remap, limits (the
+    # VESC driver's), wheelbase and frames (the ackermann odometry), publish_tf}
+    vehicle_interface: dict = field(default_factory=dict)
     # The ego's body (aib.isaac.body; scensim's Isaac world server too): a vehicle catalogue entry
     # (a car's entry.json), relative to this file; empty: the box and cylinders show.
     body: str = ""
@@ -237,6 +241,16 @@ class EgoConfig:
             cfg.body = _resolve(path.parent, cfg.body)
         if cfg.domain is None:
             cfg.domain = int(os.environ.get("ROS_DOMAIN_ID") or 0)
+        from .interfaces import DriverLimits, interface_settings
+
+        try:
+            vi = interface_settings(cfg.vehicle_interface)
+            DriverLimits(vi["limits"])
+        except ValueError as e:
+            raise ValueError(f"{path}: {e}") from None
+        if vi["profile"] != "autoware" and cfg.lockstep:
+            raise ValueError(f"{path}: lockstep waits for Autoware's localizer; the "
+                             f"{vi['profile']} vehicle interface has none: drop the lockstep")
         if cfg.ground_truth:
             unknown = set(cfg.ground_truth) - set(GROUND_TRUTH_DEFAULTS)
             if unknown:
