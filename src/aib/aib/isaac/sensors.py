@@ -212,6 +212,8 @@ class Lidar:
             self.fresh -= 1
             return False
         d = self.annotator.get_data()
+        if self.scan is not None:  # a planar scanner that sees nothing is ready (issue 003)
+            return isinstance(d, dict)
         return isinstance(d, dict) and len(d.get("data", [])) > 0
 
     def publish(self, state, sim_time, stamp):
@@ -241,6 +243,9 @@ class Lidar:
 
         d = self.annotator.get_data()
         if not isinstance(d, dict) or not len(d.get("data", [])):
+            if self.scan is not None and isinstance(d, dict):
+                # nothing in range: a scanner still publishes, every beam +inf (issue 003)
+                return self._scan_msg([], stamp)
             return None
         info = d.get("info", {})
         xyz = d["data"]
