@@ -104,7 +104,7 @@ class EgoRos:
             self._signals_pub = None
             if rig is not None:
                 for s in rig.sensors.values():
-                    if s.enabled:
+                    if s.enabled and s.type != "imu":  # the IMU is the profile's (imu_sender)
                         self.sensor_publisher(s)
             self._make_interface(rig)
             self.lockstep = None
@@ -264,6 +264,7 @@ class EgoRos:
             n.create_subscription(Float64, self._topic("commands/servo/position"), on_servo, 10)
             self.pub["core"] = n.create_publisher(VescStateStamped, self._topic("sensors/core"),
                                                   10)
+            self.core_clock = itf.TelemetryClock(self.interface["core_rate_hz"])
         self.telemetry = None
 
     @classmethod
@@ -294,6 +295,8 @@ class EgoRos:
             self.input.reset()
             if self.profile == "ackermann":
                 self.odometer.reset()
+            else:
+                self.core_clock.reset()
         self.turn = 1  # TurnIndicatorsReport.DISABLE
         self.hazard = 1  # HazardLightsReport.DISABLE
         self._reset_lockstep()
@@ -381,6 +384,70 @@ class EgoRos:
         ns = sim_ns(sim_time)
         return Time(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000)
 
+    def note_telemetry(self, t, telemetry):
+        """The component's telemetry after the physics step ending at `t` (s): the vesc
+        profile's `sensors/core` samples it at its own rate (`core_rate_hz`)."""
+        if self.profile == "vesc":
+            self.core_clock.note(t, telemetry)
+
+    def _publisher(self, kind, topic, qos):
+        """One publisher per topic for the process (egos come and go; EgoRos stays)."""
+        if topic not in self._sensor_pubs:
+            self._sensor_pubs[topic] = self.node.create_publisher(kind, topic, qos)
+        return self._sensor_pubs[topic]
+
+    def imu_sender(self, rig):
+        """How the rig's IMU `rig` publishes a reading ((wxyz, gyro rad/s, specific force m/s^2),
+        stamp): on its own topic for Autoware; on `/sensors/imu/raw` (remappable) for the
+        ackermann profile; as the VESC driver for the vesc profile, `sensors/imu`
+        (VescImuStamped) and `sensors/imu/raw` (Imu), both in the VESC's units and with no
+        frame_id (aib.interfaces.vesc_imu)."""
+        m = self.m
+        if self.profile == "vesc":
+            from vesc_msgs.msg import VescImuStamped
+
+            from .interfaces import vesc_imu
+
+            vimu = self._publisher(VescImuStamped, self._topic("sensors/imu"), 10)
+            raw = self._publisher(m["Imu"], self._topic("sensors/imu/raw"), 10)
+
+            def send(reading, stamp):
+                ypr, acc, gyro, q = vesc_imu(reading)
+                v = VescImuStamped()
+                v.header.stamp = stamp
+                v.imu.ypr.x, v.imu.ypr.y, v.imu.ypr.z = ypr
+                v.imu.linear_acceleration.x, v.imu.linear_acceleration.y, \
+                    v.imu.linear_acceleration.z = acc
+                v.imu.angular_velocity.x, v.imu.angular_velocity.y, v.imu.angular_velocity.z = gyro
+                v.imu.orientation.w, v.imu.orientation.x, v.imu.orientation.y, \
+                    v.imu.orientation.z = q
+                vimu.publish(v)
+                r = m["Imu"]()
+                r.header.stamp = stamp
+                r.linear_acceleration.x, r.linear_acceleration.y, r.linear_acceleration.z = acc
+                r.angular_velocity.x, r.angular_velocity.y, r.angular_velocity.z = gyro
+                r.orientation.w, r.orientation.x, r.orientation.y, r.orientation.z = q
+                raw.publish(r)
+            return send
+        if self.profile == "ackermann":
+            pub = self._publisher(m["Imu"], self._topic("/sensors/imu/raw"), self.reliable)
+        else:
+            pub, _ = self.sensor_publisher(rig)
+
+        def send(reading, stamp):
+            q, gyro, acc = reading
+            msg = m["Imu"]()
+            msg.header.stamp = stamp
+            msg.header.frame_id = rig.frame
+            msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z = (
+                float(c) for c in q)
+            msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = (
+                float(c) for c in gyro)
+            msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = (
+                float(c) for c in acc)
+            pub.publish(msg)
+        return send
+
     def publish_status(self, state, stamp, wheel_speeds=None, driven=None):
         """The vehicle interface's status for one frame: Autoware's reports, the `ackermann`
         profile's odometry (from the driven wheels' `wheel_speeds`, rad/s, and the tire angle),
@@ -388,7 +455,8 @@ class EgoRos:
         if self.profile == "ackermann":
             return self._publish_odom(state, stamp, wheel_speeds, driven)
         if self.profile == "vesc":
-            return self._publish_core(stamp)
+            t = stamp.sec + stamp.nanosec * 1e-9
+            return self._publish_core(t)
         m, pub = self.m, self.pub
         v = m["VelocityReport"]()
         v.header.stamp = stamp
@@ -451,15 +519,20 @@ class EgoRos:
             tf.transform.rotation = o.pose.pose.orientation
             self.pub["tf"].publish(self.m["TFMessage"](transforms=[tf]))
 
-    def _publish_core(self, stamp):
-        """`sensors/core` from the component's last telemetry (aib.interfaces.vesc_state)."""
+    def _publish_core(self, t):
+        """`sensors/core` at its own rate (`core_rate_hz`, the driver's 50 Hz by default): one
+        message per tick that fell in the frame ending at `t` (the ROS time, s), each from the
+        component's telemetry at or before its tick, stamped at it (aib.interfaces)."""
         from .interfaces import vesc_state
+        from .sim_time import BASE_NS
 
-        msg = self.m["VescStateStamped"]()
-        msg.header.stamp = stamp
-        for k, v in vesc_state(self.telemetry).items():
-            setattr(msg.state, k, v)
-        self.pub["core"].publish(msg)
+        base = BASE_NS * 1e-9
+        for tick, telemetry in self.core_clock.due(t - base):
+            msg = self.m["VescStateStamped"]()
+            msg.header.stamp = self.stamp(tick)
+            for k, v in vesc_state(telemetry).items():
+                setattr(msg.state, k, v)
+            self.pub["core"].publish(msg)
 
     def publish_ground_truth(self, gt, stamp):
         """base_link's ground truth (aib.sensing.ground_truth) for one frame, when on."""

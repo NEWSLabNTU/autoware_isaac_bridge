@@ -486,7 +486,8 @@ class Imu:
 
     def __init__(self, rig, ros, stage=None, vehicle_path=None):
         self.rig, self.ros = rig, ros
-        self.pub, _ = ros.sensor_publisher(rig)
+        # the vehicle interface decides its topics and units (aib.ros.EgoRos.imu_sender)
+        self.send = ros.imu_sender(rig)
         self.timer = Periodic(rig.period)
         # Faster than the frames (a ZED's 100 Hz under 20 Hz frames): every tick of its own
         # clock, each from the last substep's state at or before it, as the hardware samples
@@ -510,14 +511,7 @@ class Imu:
             self._send(reading, self.ros.stamp(tick))
 
     def _send(self, reading, stamp):
-        q, gyro, acc = reading
-        msg = self.ros.m["Imu"]()
-        msg.header.stamp = stamp
-        msg.header.frame_id = self.rig.frame
-        msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z = (float(c) for c in q)
-        msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = (float(c) for c in gyro)
-        msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = (float(c) for c in acc)
-        self.pub.publish(msg)
+        self.send(reading, stamp)
 
     def before_substep(self, vehicle, state, dt):
         # `state` is the body after the last substep, at the clock before this one

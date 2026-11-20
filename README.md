@@ -115,8 +115,8 @@ component that takes another is refused.
 | `profile` | takes | publishes |
 |---|---|---|
 | `autoware` (the default) | Autoware's `/control/command/*` | `/vehicle/status/*` |
-| `ackermann` | `/drive` (`AckermannDriveStamped`) | `/odom` and tf `odom` to `base_link`, by `vesc_to_odom`'s kinematics on the driven wheels and the tire angle |
-| `vesc` | the VESC driver's `commands/motor/*` and `commands/servo/position` | `sensors/core` (the component's telemetry, each frame) and `sensors/servo_position_command` (the clipped servo command, at once) |
+| `ackermann` | `/drive` (`AckermannDriveStamped`) | `/odom` and tf `odom` to `base_link`, by `vesc_to_odom`'s kinematics on the driven wheels and the tire angle; the rig's IMU on `/sensors/imu/raw` |
+| `vesc` | the VESC driver's `commands/motor/*` and `commands/servo/position` | `sensors/core` (the component's telemetry at `core_rate_hz`, default the driver's 50 Hz), `sensors/servo_position_command` (the clipped servo command, at once), and the rig's IMU as the driver gives it: `sensors/imu` (`VescImuStamped`) and `sensors/imu/raw`, both in the VESC's units (g, deg/s, degrees) with no frame_id |
 
 The `vesc` profile is f1tenth's `vesc_driver_node`, so a stack's own `ackermann_to_vesc` and
 `vesc_to_odom` run unchanged on it. Its other keys:
@@ -127,7 +127,7 @@ The `vesc` profile is f1tenth's `vesc_driver_node`, so a stack's own `ackermann_
 - `remap`: `{topic: topic}`, for any profile's topics.
 
 The `ackermann` profile's odometry has keys too: `wheelbase` (default: the rig's), `frames`
-(`odom` and `base`) and `publish_tf`. Isaac bundles `ackermann_msgs`. `vesc_msgs` comes from
+(`odom` and `base`) and `publish_tf`. `sensors/core` samples the component's telemetry after every physics step and goes out at `core_rate_hz` of simulation time, each message stamped at its tick, as the driver polls the VESC. Isaac bundles `ackermann_msgs`. `vesc_msgs` comes from
 the stack's workspace, built for Isaac's Python:
 
 ```bash

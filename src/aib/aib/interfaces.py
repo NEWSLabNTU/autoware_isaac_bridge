@@ -21,7 +21,10 @@ the command's age in simulation time; what it reports in `Actuation.telemetry` g
 """
 import math
 
-from sim_vehicle_ecu.signals import MOTOR_MODES, AckermannCommand, VescCommand
+from .deps import use
+
+use("sim_vehicle_ecu")
+from sim_vehicle_ecu.signals import MOTOR_MODES, AckermannCommand, VescCommand  # noqa: E402
 
 PROFILES = ("autoware", "ackermann", "vesc")
 # the command type each profile hands the component (sim_vehicle_ecu.component.COMMANDS)
@@ -43,7 +46,8 @@ STATE_FLOATS = ("temp_fet", "temp_motor", "current_motor", "current_input", "avg
                 "energy_drawn", "energy_regen", "pid_pos_now", "ntc_temp_mos1", "ntc_temp_mos2",
                 "ntc_temp_mos3", "avg_vd", "avg_vq")
 STATE_INTS = ("displacement", "distance_traveled", "fault_code", "controller_id")
-STATE_PERIOD_S = 0.02  # the driver polls the VESC at 50 Hz
+CORE_RATE_HZ = 50.0  # the driver polls the VESC at 50 Hz (vesc_driver's 20 ms timer)
+G = 9.80665  # m/s^2 per g: the VESC reports acceleration in g
 
 
 def check_profile(profile):
@@ -55,7 +59,8 @@ def check_profile(profile):
 
 INTERFACE_DEFAULTS = {"profile": "autoware", "namespace": "", "remap": {}, "limits": {},
                       "wheelbase": None, "publish_tf": True,
-                      "frames": {"odom": "odom", "base": "base_link"}}
+                      "frames": {"odom": "odom", "base": "base_link"},
+                      "core_rate_hz": CORE_RATE_HZ}
 
 
 def interface_settings(vehicle_interface):
@@ -73,6 +78,9 @@ def interface_settings(vehicle_interface):
         raise ValueError("vehicle_interface.remap: a mapping of topic to topic")
     if out["profile"] != "vesc" and out["limits"]:
         raise ValueError("vehicle_interface.limits are the VESC driver's: the vesc profile only")
+    rate = out["core_rate_hz"]
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not rate > 0:
+        raise ValueError(f"vehicle_interface.core_rate_hz {rate!r}: a rate in Hz, > 0")
     return out
 
 
@@ -170,6 +178,63 @@ def vesc_state(telemetry):
             raise ValueError(f"telemetry {k!r} is not a VescState field (nor one of "
                              f"{', '.join(TELEMETRY_FIELDS)})")
     return out
+
+
+class TelemetryClock:
+    """`sensors/core` at the driver's own rate, not the frames': the component's telemetry is
+    noted after every physics step, and each frame gives the ticks of `rate_hz` that fell in it,
+    each with the last telemetry at or before it (as the driver polls the VESC). Times are
+    simulation seconds."""
+
+    def __init__(self, rate_hz=CORE_RATE_HZ):
+        self.period = 1.0 / float(rate_hz)
+        self.reset()
+
+    def reset(self):
+        self.samples = []  # (time, telemetry), oldest first
+        self.next = None
+
+    def note(self, t, telemetry):
+        self.samples.append((float(t), telemetry))
+
+    def due(self, now):
+        """[(tick, telemetry)] for the ticks up to `now`; the first call ticks at once."""
+        if self.next is None:
+            self.next = now
+        out = []
+        while self.next <= now + 1e-9:
+            out.append((self.next, self._at(self.next)))
+            self.next += self.period
+        if self.samples:  # keep the last at or before the next tick
+            keep = max((i for i, (t, _) in enumerate(self.samples) if t <= self.next + 1e-9),
+                       default=0)
+            del self.samples[:keep]
+        return out
+
+    def _at(self, t):
+        best = None
+        for ts, tel in self.samples:
+            if ts <= t + 1e-9:
+                best = tel
+            else:
+                break
+        if best is None and self.samples:
+            best = self.samples[0][1]
+        return best
+
+
+def vesc_imu(reading):
+    """The VESC's IMU as its driver reports it, from aib's reading (orientation wxyz, gyro rad/s,
+    specific force m/s^2): `(ypr deg, acceleration g, gyro deg/s, quaternion wxyz)`. The driver
+    puts these units on both `sensors/imu` and `sensors/imu/raw` (vesc_packet.cpp: roll, pitch
+    and yaw in degrees, acc_* in g, gyr_* in deg/s), with no frame_id."""
+    (w, x, y, z), gyro, acc = reading
+    roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+    pitch = math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x))))
+    yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    ypr = tuple(math.degrees(a) for a in (roll, pitch, yaw))
+    return (ypr, tuple(float(a) / G for a in acc), tuple(math.degrees(float(g)) for g in gyro),
+            (float(w), float(x), float(y), float(z)))
 
 
 class Odometer:

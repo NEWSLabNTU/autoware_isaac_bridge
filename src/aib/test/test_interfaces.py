@@ -107,3 +107,33 @@ def test_an_ego_config_names_its_interface(tmp_path):
         cfg("vehicle_interface: {profile: vesc, limits: {erpm: [0, 1]}}\n")
     with pytest.raises(ValueError, match="drop the lockstep"):
         cfg("vehicle_interface: {profile: ackermann}\nlockstep: {timeout_s: 1}\n")
+
+
+def test_sensors_core_ticks_at_the_driver_s_50_hz_not_the_frames():
+    c = itf.TelemetryClock()
+    t = 0.0
+    out = []
+    for frame in range(10):  # 20 Hz frames of three 60 Hz substeps
+        for _ in range(3):
+            t += 1 / 60
+            c.note(t, {"erpm": round(t * 1000)})
+        out += c.due(t)
+    ticks = [round(tick, 6) for tick, _ in out]
+    assert ticks[:3] == [round(1 / 60 * 3, 6), round(0.05 + 0.02, 6), round(0.05 + 0.04, 6)]
+    assert len(out) == 1 + int((t - ticks[0]) / 0.02 + 1e-9)  # 50 Hz from the first
+    for tick, tel in out:  # the last telemetry at or before each tick
+        assert tel["erpm"] <= round(tick * 1000) and tel["erpm"] > round((tick - 1 / 60) * 1000) - 1
+    c.reset()
+    assert c.due(1.0) == [(1.0, None)]
+    with pytest.raises(ValueError, match="core_rate_hz"):
+        itf.interface_settings({"profile": "vesc", "core_rate_hz": 0})
+
+
+def test_the_vesc_imu_is_in_the_driver_s_units():
+    import math as m
+    yaw = 0.3
+    q = (m.cos(yaw / 2), 0.0, 0.0, m.sin(yaw / 2))
+    ypr, acc, gyro, quat = itf.vesc_imu((q, (0.0, 0.0, 0.5), (1.0, 0.0, 9.80665)))
+    assert abs(ypr[2] - m.degrees(yaw)) < 1e-9 and ypr[0] == 0.0
+    assert acc == (1.0 / 9.80665, 0.0, 1.0) and abs(gyro[2] - m.degrees(0.5)) < 1e-12
+    assert quat == q

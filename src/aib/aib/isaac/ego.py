@@ -89,6 +89,8 @@ class Ego:
 
     def after_substep(self, physx, dt):
         self.vehicle.sample(physx, dt, self.state)
+        torques = getattr(self.vehicle, "torques", None)
+        self.ros.note_telemetry(self.now, getattr(torques, "telemetry", None))
 
     def teleport(self, pose, physx):
         self.vehicle.teleport(pose, physx)
