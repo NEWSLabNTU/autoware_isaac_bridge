@@ -64,7 +64,7 @@ class Rig:
     path: str = ""
     spec: dict = field(default_factory=dict)  # that spec's document (the component's car)
     # a run's control component in place of the spec's (scensim roadmap 091):
-    # {entry_point, params}; empty: the spec's
+    # {entry_point, params, truth: {<declared input>: {latency_s, noise_std}}}; empty: the spec's
     component: dict = field(default_factory=dict)
 
     def make_component(self, seed=0):
@@ -114,10 +114,10 @@ class Rig:
         body = doc.get("body") or {}
         spec_hash = str(doc.get("spec_hash") or "")
         spec = spec_doc(path, doc.get("spec"), spec_hash)
-        if component and (set(component) - {"entry_point", "params"}
+        if component and (set(component) - {"entry_point", "params", "truth"}
                           or not component.get("entry_point")):
-            raise ValueError(f"component: {{entry_point: <name>, params: {{...}}}}, is "
-                             f"{component!r}")
+            raise ValueError(f"component: {{entry_point: <name>, params: {{...}}, truth: "
+                             f"{{<input>: {{latency_s, noise_std}}}}}}, is {component!r}")
         return cls(name=doc.get("name", path.stem),
                    vehicle=VehicleParams.from_dict(doc.get("vehicle"), vehicle_overrides),
                    ecu=Calibration.from_spec(spec, ecu_overrides),

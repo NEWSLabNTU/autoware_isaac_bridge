@@ -343,7 +343,7 @@ def main(argv=None):
     physx = omni.physx.get_physx_interface()
     pose = ((0.0, 0.0, 0.05), (1.0, 0.0, 0.0, 0.0))
     veh = Vehicle(stage, "/World/ego", params, rig.make_component(), rig.box_center,
-                  rig.box_dims, pose)
+                  rig.box_dims, pose, truth_settings=rig.component.get("truth"))
     log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
              SUB, dt)
     summary = {"powertrain": rig.ecu.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},

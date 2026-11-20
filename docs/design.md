@@ -127,7 +127,11 @@ when the spec's `powertrain.model` is `component` or the ego config names one (`
 {entry_point, params}`; `aib.steptest --component <name>`). It is found by its entry point in
 group `scensim.vehicle_components` on the interpreter's path, takes Autoware's request (others
 come with scensim 091 step 5), and its actuation is checked every step (shape, finite values).
-Its `driven` wheels and `brake_floor` feed `release_sticky`. The rest of this section is the drive unit as it moved (aib `1d49569`); the slip it
+Its `driven` wheels and `brake_floor` feed `release_sticky`. It sees the car's own sensors; ground
+truth only as it declares it (`truth = (...)`, sim_vehicle_ecu's `TRUTH_INPUTS`: what its user
+also measured on the real car), computed from the last step (`aib.control.truth_values`) and
+delivered through a `TruthFeed` with the latency and noise the ego config's `component.truth`
+sets. The rest of this section is the drive unit as it moved (aib `1d49569`); the slip it
 names is the estimate since then.
 
 ### Powertrain

@@ -296,3 +296,26 @@ def test_an_ego_config_names_a_component(tmp_path):
     cfg_path.write_text(f"rig: {RIG}\ncomponent: {{entry_point: my_racer.sample}}\n")
     cfg = EgoConfig.load(cfg_path)
     assert cfg.component == {"entry_point": "my_racer.sample"}
+
+
+def test_truth_values_are_the_declared_inputs_only():
+    """scensim 091 (the user): a component's declared ground truth, from the state the world
+    left; only the names it declared."""
+    import math
+
+    import pytest
+    from aib.control import State, truth_values
+
+    st = State(position=(12.0, 5.0, 0.0), quat=(math.cos(0.25), 0.0, 0.0, math.sin(0.25)),
+               velocity=(4.0, 0.4, 0.0), angular_velocity=(0.0, 0.0, 0.3))
+    wheels = [type("W", (), {"slip": s})() for s in (0.1, 0.1, 0.2, 0.2)]
+    got = truth_values(st, wheels, ("pose", "speed", "wheel_slip", "sideslip", "yaw_rate"),
+                       map_origin=(10.0, 0.0, 0.0))
+    assert set(got) == {"pose", "speed", "wheel_slip", "sideslip", "yaw_rate"}
+    assert got["pose"] == pytest.approx((2.0, 5.0, 0.5))
+    assert got["speed"] == 4.0 and got["yaw_rate"] == 0.3
+    assert got["wheel_slip"] == (0.1, 0.1, 0.2, 0.2)
+    assert got["sideslip"] == pytest.approx(math.atan2(0.4, 4.0))
+    assert truth_values(st, None, ()) == {}
+    with pytest.raises(ValueError, match="no ground truth 'mind'"):
+        truth_values(st, wheels, ("mind",))

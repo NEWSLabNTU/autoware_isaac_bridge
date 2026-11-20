@@ -79,3 +79,30 @@ def ackermann(tire_angle, wheel_base, wheel_tread):
     radius = wheel_base / math.tan(tire_angle)
     half_t = wheel_tread / 2
     return math.atan(wheel_base / (radius - half_t)), math.atan(wheel_base / (radius + half_t))
+
+
+def truth_values(state, wheel_states, names, map_origin=(0.0, 0.0, 0.0)):
+    """The ground truth a control component declared (sim_vehicle_ecu.component.TRUTH_INPUTS), as
+    the world knows it after the last step: only `names`. Pure."""
+    w, x, y, z = state.quat
+    yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    vx, vy = state.velocity[0], state.velocity[1]
+    out = {}
+    for n in names:
+        if n == "pose":
+            out[n] = (state.position[0] - map_origin[0], state.position[1] - map_origin[1], yaw)
+        elif n == "yaw":
+            out[n] = yaw
+        elif n == "velocity":
+            out[n] = (vx, vy)
+        elif n == "speed":
+            out[n] = vx
+        elif n == "yaw_rate":
+            out[n] = state.angular_velocity[2]
+        elif n == "wheel_slip":
+            out[n] = tuple(ws.slip for ws in wheel_states) if wheel_states else (0.0,) * 4
+        elif n == "sideslip":
+            out[n] = math.atan2(vy, vx) if abs(vx) > 0.1 else 0.0
+        else:
+            raise ValueError(f"no ground truth {n!r}")
+    return out

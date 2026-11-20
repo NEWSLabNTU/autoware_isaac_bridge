@@ -45,7 +45,7 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
-from ..control import Command, State, ackermann, release_sticky
+from ..control import Command, State, ackermann, release_sticky, truth_values
 from ..deps import use
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams, road_load
@@ -103,11 +103,13 @@ def ensure_vehicle_scene(stage):
 
 class Vehicle:
     def __init__(self, stage, path, params: VehicleParams, component, box_center,
-                 box_dims, pose, ground_clearance=0.0):
+                 box_dims, pose, ground_clearance=0.0, truth_settings=None, truth_seed=0):
         """`params`: the PhysX vehicle (a rig's `vehicle`); `component`: its control component
         (scensim roadmap 091: a rig's `make_component()`, sim_vehicle_ecu's interface), or a
         `Calibration` for the shipped onboard computers on it; `ground_clearance`: the
-        underbody's height (a rig's), where a skid plate goes (0: none)."""
+        underbody's height (a rig's), where a skid plate goes (0: none); `truth_settings`:
+        {input: {latency_s, noise_std}} for the ground truth the component declares, and
+        `truth_seed` its noise's seed."""
         self.stage = stage
         self.path = path
         self.p = p = params
@@ -121,6 +123,11 @@ class Vehicle:
         if not hasattr(component, "debug"):
             component.debug = {}  # what the recorder reads of the shipped ones
         self.ecu = component  # the name the hosts read (`debug`) and reset
+        # the ground truth it declared, with each input's latency and noise (scensim 091)
+        self.truth = tuple(getattr(component, "truth", ()))
+        self.truth_feed = components.TruthFeed(self.truth, truth_settings, truth_seed)
+        self.map_origin = (0.0, 0.0, 0.0)  # the host's, for a declared pose
+        self.t = 0.0  # since the last reset, s
         self.brake_floor = float(getattr(component, "brake_floor", Calibration.brake_floor))
         self.driven = tuple(bool(d) for d in getattr(component, "driven", (True,) * 4))
         ensure_vehicle_scene(stage)
@@ -298,6 +305,8 @@ class Vehicle:
         self.contacts = None
         self.road_load.Set(Gf.Vec3f(0, 0, 0))
         self.ecu.reset()
+        self.truth_feed.reset()
+        self.t = 0.0
         self.tire_angle = 0.0
 
     # --- Actuation -------------------------------------------------------------------------
@@ -308,6 +317,7 @@ class Vehicle:
         p = self.p
         request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
         self.torques = act = components.checked(self.ecu.step(request, self.sensors(state), dt))
+        self.t += dt
         self.tire_angle = act.tire_angle
         if p.ackermann:
             left, right = ackermann(self.tire_angle, p.wheel_base, p.wheel_tread)
@@ -328,8 +338,13 @@ class Vehicle:
         has stepped the wheels."""
         if self.wheel_states is None:
             return None
+        truth = None
+        if self.truth:
+            truth = self.truth_feed(self.t, truth_values(state, self.wheel_states, self.truth,
+                                                         self.map_origin))
         return Sensors(tuple(w.rotation_speed for w in self.wheel_states),
-                       state.angular_velocity[2], state.acceleration[0], state.acceleration[1])
+                       state.angular_velocity[2], state.acceleration[0], state.acceleration[1],
+                       truth)
 
     def set_wheel_stiffness(self, i, lateral, longitudinal):
         """Wheel `i`'s tire stiffness from the next step on, as shares of the rig's: the lateral

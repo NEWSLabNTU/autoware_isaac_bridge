@@ -41,9 +41,11 @@ class Ego:
         self.ros = ros
         self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.make_component(),
                                box_center or rig.box_center, box_dims or rig.box_dims, pose,
-                               ground_clearance=rig.ground_clearance)
+                               ground_clearance=rig.ground_clearance,
+                               truth_settings=rig.component.get("truth"))
         self.state = State()
         self.map_origin = projector.origin if projector is not None else (0.0, 0.0, 0.0)
+        self.vehicle.map_origin = self.map_origin
         self.sensors = [sensor_kinds.make(s, ros, stage, path)
                         for s in rig.sensors.values() if s.enabled]
         for s in self.sensors:
