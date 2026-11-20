@@ -189,7 +189,7 @@ class Vehicle:
         if px_travel > real_travel + 1e-9:
             k_max = max(front_axle[1], rear_axle[1])
             sprung = max(front_axle[0], rear_axle[0])
-            rate = p.bump_rate or 20.0 * k_max
+            rate = p.bump_rate or 5.0 * k_max
             # the stop's slope at full compression is 2 rate (aib.bump_stop)
             self.bump = BumpStop(real_travel, p.bump_stop, rate,
                                  2.0 * p.bump_damping * math.sqrt(2.0 * rate * sprung))

@@ -62,8 +62,8 @@ class VehicleParams:
     # the droop stays the real one and its rigid limit lies beyond the real travel, where the
     # bump stop (aib.bump_stop) stops the wheel; the sweep needs it (issue 029: 0.50 m)
     physx_travel: float = 0.0
-    bump_stop: float = 0.03  # m: the stop's engagement before full compression
-    bump_rate: float = 0.0  # N/m at full compression (0: 20 times the axle's spring)
+    bump_stop: float = 0.06  # m: the stop's engagement before full compression
+    bump_rate: float = 0.0  # N/m at full compression (0: 5 times the axle's spring)
     bump_damping: float = 0.5  # the stop's damping ratio at full compression, on the corner
     # PhysX vehicle integration
     physx_substeps: int = 8

@@ -43,6 +43,11 @@ vehicle:
   suspension_frequency: 1.6
   suspension_damping_ratio: 0.45
   suspension_travel: 0.2
+  wheel_query: raycast
+  physx_travel: 0.0
+  bump_stop: 0.06
+  bump_rate: 0.0
+  bump_damping: 0.5
   physx_substeps: 8
   substep_threshold_speed: 5.0
   min_active_slip_denominator: 4.0

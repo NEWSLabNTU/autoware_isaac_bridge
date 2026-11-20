@@ -27,8 +27,8 @@ class BumpStop:
     bump: float = 0.03  # engagement before full compression, m
     rate: float = 0.0  # the stop's rate at full compression, N/m
     damping: float = 0.0  # N s/m while engaged, on the compression speed
-    v_max: float = 0.5  # m/s: the compression speed the damper sees, at most
-    cap: float = 2.0  # the force's cap, times rate * bump
+    v_max: float = 0.2  # m/s: the compression speed the damper sees, at most
+    cap: float = 1.0  # the force's cap, times rate * bump
 
     def __post_init__(self):
         if not 0.0 < self.bump < self.travel:
