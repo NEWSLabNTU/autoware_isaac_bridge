@@ -16,9 +16,9 @@ every step from the body's speed. Each step's wheel states (spin, both slips, th
 force, contact) are read back for the sensors and the host's surface layer.
 
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
-no ground materials: its default value is the wheel's friction on whatever it stands on, the
-its axle's `tire_friction` (`Vehicle.tire_frictions`) until a host writes another (`set_wheel_friction`). A host with a
-surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
+no ground materials: its default value is the wheel's friction on whatever it stands on, its
+axle's `tire_friction` (`Vehicle.tire_frictions`) until a host writes another
+(`set_wheel_friction`). A host with a surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
 ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
 inputs of scensim's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
