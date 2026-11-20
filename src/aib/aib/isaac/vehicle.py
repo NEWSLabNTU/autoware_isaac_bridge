@@ -29,6 +29,8 @@ when it goes: PhysX refuses to remove a tire friction table while the simulation
 ("removing tire friction tables while playing is not permitted"), so one under the vehicle
 failed at every despawn; a vehicle spawned again at the same path takes its tables back.
 """
+import collections
+import logging
 import math
 from typing import NamedTuple
 
@@ -57,6 +59,8 @@ use("sim_vehicle_ecu")
 
 from sim_vehicle_ecu import Calibration, Request, Sensors  # noqa: E402
 from sim_vehicle_ecu.signals import GEAR_DRIVE, GEAR_REVERSE, AckermannCommand  # noqa: E402
+
+log = logging.getLogger("aib")
 from sim_vehicle_ecu import component as components  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
@@ -336,6 +340,10 @@ class Vehicle:
         self.tire_angle = 0.0
         self.torques = None  # the last step's sim_vehicle_ecu.Actuation
         self.last = None  # (position, quat, velocity in world) of the last substep
+        self.poses = collections.deque(maxlen=FALLBACK_STEPS_MAX)  # the fallback's window
+        self.vels = collections.deque(maxlen=FALLBACK_STEPS_MAX)
+        self.rb_view = self.rb_sim = None  # PhysX's tensor view of the body (issue 086)
+        self.velocity_source = "physx"  # or "positions" when no view serves
         self.attach = [((L if is_front else 0.0), side * half_t, frame_z)
                        for _, is_front, side in WHEELS]
         self._force_at = None  # (simulation interface, stage id, body id), at the first force
@@ -496,25 +504,40 @@ class Vehicle:
         return out, contacts
 
     def sample(self, physx, dt, state: State):
-        """Read the body after one physics step; velocities by difference (base_link frame)."""
+        """Read the body after one physics step (base_link frame).
+
+        The velocities are PhysX's own, read through a tensor view of the body (`_physx_velocity`),
+        moved from the centre of mass to base_link; the acceleration is their difference over the
+        step. Differencing the float32 pose instead (twice, for the acceleration) was noise at a high
+        physics rate or far from the world's origin (scensim issue 086: 0.2 m/s^2 at 60 Hz 1 km out,
+        on a gentle ramp). Without a view (a host whose tensor API cannot serve), the pose is
+        differenced over a fixed 1/60 s window (FALLBACK_WINDOW_S), the velocity and then the
+        acceleration, so a higher rate is no worse than 60 Hz and 60 Hz is as before."""
         t = physx.get_rigidbody_transformation(self.path)
         pos = tuple(float(c) for c in t["position"])
         rx, ry, rz, rw = (float(c) for c in t["rotation"])
         q = (rw, rx, ry, rz)
+        measured = self._physx_velocity(q) if dt > 0 else None
         if self.last is None or dt <= 0:
-            vel_w = (0.0, 0.0, 0.0)
-            omega = (0.0, 0.0, 0.0)
+            vel_w, omega_w = measured or ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
             acc = (0.0, 0.0, 0.0)
+            self.poses = collections.deque([(pos, q)], maxlen=FALLBACK_STEPS_MAX)
+            self.vels = collections.deque([vel_w], maxlen=FALLBACK_STEPS_MAX)
         else:
-            lp, lq, lv = self.last
-            vel_w = tuple((a - b) / dt for a, b in zip(pos, lp))
-            dq = qmul(qconj(lq), q)  # body-frame rotation over the step
-            if dq[0] < 0:
-                dq = tuple(-c for c in dq)
-            s = math.sqrt(dq[1] ** 2 + dq[2] ** 2 + dq[3] ** 2)
-            angle = 2 * math.atan2(s, dq[0])
-            omega = (0.0, 0.0, 0.0) if s < 1e-12 else tuple(c / s * angle / dt for c in dq[1:])
-            acc = qrot(qconj(q), tuple((a - b) / dt for a, b in zip(vel_w, lv)))
+            _, _, lv = self.last
+            self.poses.append((pos, q))
+            if measured is not None:
+                vel_w, omega_w = measured
+                self.velocity_source = "physx"
+                acc = qrot(qconj(q), tuple((a - b) / dt for a, b in zip(vel_w, lv)))
+            else:
+                vel_w, omega_w = self._differenced(dt)
+                self.velocity_source = "positions"
+                # the windowed velocity, differenced over the same window
+                k = max(1, min(len(self.vels), int(round(FALLBACK_WINDOW_S / dt))))
+                acc = qrot(qconj(q), tuple((a - b) / (k * dt) for a, b in zip(vel_w, self.vels[-k])))
+            self.vels.append(vel_w)
+        omega = qrot(qconj(q), omega_w)
         self.last = (pos, q, vel_w)
         self.wheel_states, self.contacts = self._wheel_states(physx)
         state.position = pos
@@ -523,6 +546,86 @@ class Vehicle:
         state.angular_velocity = omega
         state.acceleration = acc
         state.tire_angle = self.tire_angle
+
+
+    def _physx_velocity(self, q):
+        """PhysX's (linear, angular) velocity of base_link in the world frame, from a tensor view of
+        the body (its centre of mass's velocity moved to base_link: v - w x r, r the centre of mass
+        from base_link in the world frame), or None when no view can serve."""
+        view = self._view()
+        if view is None:
+            return None
+        try:
+            v = view.get_velocities()
+        except Exception:  # noqa: BLE001 - a view the stage has since invalidated
+            self.rb_view = None
+            return None
+        lin = tuple(float(c) for c in v[0, :3])
+        ang = tuple(float(c) for c in v[0, 3:6])
+        r = qrot(q, tuple(float(c) for c in self.p.com))
+        wxr = (ang[1] * r[2] - ang[2] * r[1], ang[2] * r[0] - ang[0] * r[2], ang[0] * r[1] - ang[1] * r[0])
+        return tuple(a - b for a, b in zip(lin, wxr)), ang
+
+    def _view(self):
+        """The body's rigid-body view, made on first use and again after the stage invalidated it;
+        None (and the fallback) when the tensor API cannot give one."""
+        view = getattr(self, "rb_view", None)
+        sim = _sim_view()
+        if sim is None:
+            return None
+        if view is not None and sim is getattr(self, "rb_sim", None):
+            return view
+        try:
+            view = sim.create_rigid_body_view([self.path])
+        except Exception as e:  # noqa: BLE001
+            log.warning("vehicle %s: no tensor view of the body (%s): velocities from the pose",
+                        self.path, e)
+            view = None
+        if view is not None and (getattr(view, "_backend", True) is None or view.count != 1):
+            view = None
+        self.rb_view, self.rb_sim = view, sim
+        return view
+
+    def _differenced(self, dt):
+        """The fallback: velocity and angular velocity of the pose over the last FALLBACK_WINDOW_S
+        (at least one step), world frame."""
+        k = max(1, min(len(self.poses) - 1, int(round(FALLBACK_WINDOW_S / dt))))
+        (p0, q0), (p1, q1) = self.poses[-1 - k], self.poses[-1]
+        span = k * dt
+        vel = tuple((a - b) / span for a, b in zip(p1, p0))
+        dq = qmul(qconj(q0), q1)  # body-frame rotation over the window
+        if dq[0] < 0:
+            dq = tuple(-c for c in dq)
+        s = math.sqrt(dq[1] ** 2 + dq[2] ** 2 + dq[3] ** 2)
+        angle = 2 * math.atan2(s, dq[0])
+        omega_b = (0.0, 0.0, 0.0) if s < 1e-12 else tuple(c / s * angle / span for c in dq[1:])
+        return vel, qrot(q1, omega_b)
+
+
+FALLBACK_WINDOW_S = 1.0 / 60.0  # the pose difference's window without a tensor view (issue 086)
+FALLBACK_STEPS_MAX = 64
+_SIM = [None, False]  # the process's tensor simulation view, and whether it failed
+
+
+def _sim_view():
+    """One omni.physics.tensors simulation view for the process (numpy), made after the stage
+    plays and again when the stage invalidated it; None when the tensor API cannot serve."""
+    sim = _SIM[0]
+    if sim is not None and sim.is_valid:
+        return sim
+    try:
+        import omni.physics.tensors as tensors
+        import omni.usd
+
+        sim = tensors.create_simulation_view("numpy", stage_id=omni.usd.get_context().get_stage_id())
+        sim.set_subspace_roots("/")
+    except Exception as e:  # noqa: BLE001
+        if not _SIM[1]:
+            log.warning("no tensor simulation view (%s): vehicle velocities from the pose", e)
+            _SIM[1] = True
+        sim = None
+    _SIM[0] = sim
+    return sim
 
 
 def _dot(a, b):
