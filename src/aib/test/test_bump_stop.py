@@ -71,6 +71,14 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(VehicleParams(physx_travel=0.1).travels(), (0.2, 0.2))
         self.assertEqual(p.wheel_query, "raycast")
 
+    def test_the_sweep_alone_lengthens_physx_travel(self):
+        """`wheel_query: sweep` is all an ego config needs (scensim issue 077)."""
+        self.assertEqual(VehicleParams(wheel_query="sweep").travels(), (0.5, 0.2))
+        self.assertEqual(VehicleParams(wheel_query="sweep", suspension_travel=0.04).travels(),
+                         (0.1, 0.04))  # a small car's
+        self.assertEqual(VehicleParams(wheel_query="sweep", physx_travel=0.6).travels(),
+                         (0.6, 0.2))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,9 +58,10 @@ class VehicleParams:
     # PhysX's wheel query (scensim issue 077): "raycast" (one ray down the wheel's centre) or
     # "sweep" (the wheel's cylinder: it climbs a sharp curb, the raycast does not)
     wheel_query: str = "raycast"
-    # PhysX's travel, m (0: suspension_travel). Longer: its frame rises by the difference, so
-    # the droop stays the real one and its rigid limit lies beyond the real travel, where the
-    # bump stop (aib.bump_stop) stops the wheel; the sweep needs it (issue 029: 0.50 m)
+    # PhysX's travel, m (0: suspension_travel, or SWEEP_TRAVEL times it with the sweep). Longer:
+    # its frame rises by the difference, so the droop stays the real one and its rigid limit
+    # lies beyond the real travel, where the bump stop (aib.bump_stop) stops the wheel; the
+    # sweep needs it (issues 029, 077: 0.50 m on the Model 3's 0.20)
     physx_travel: float = 0.0
     bump_stop: float = 0.06  # m: the stop's engagement before full compression
     bump_rate: float = 0.0  # N/m at full compression (0: 5 times the axle's spring)
@@ -112,14 +113,21 @@ class VehicleParams:
         return tuple(out), G / omega ** 2
 
     def travels(self):
-        """(PhysX's travel, the real travel), m."""
-        return max(self.physx_travel, self.suspension_travel), self.suspension_travel
+        """(PhysX's travel, the real travel), m: `physx_travel` when set, else with the sweep
+        SWEEP_TRAVEL times the real one, else the real one; never shorter than the real one."""
+        px = self.physx_travel or (SWEEP_TRAVEL * self.suspension_travel
+                                   if self.wheel_query == "sweep" else 0.0)
+        return max(px, self.suspension_travel), self.suspension_travel
 
     def diagonal_inertia(self):
         lx, ly, lz = self.inertia_box
         s = self.mass / 12.0
         return ((ly * ly + lz * lz) * s, (lx * lx + lz * lz) * s, (lx * lx + ly * ly) * s)
 
+
+# With the sweep and no physx_travel, PhysX's travel is this many times the real one: at 2.0 the
+# Model 3's sweep still threw the car off a 10 cm cleat at 20 m/s, at 2.5 not (scensim issue 077)
+SWEEP_TRAVEL = 2.5
 
 # Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
 ROLLING_RAMP = 0.5  # m/s
