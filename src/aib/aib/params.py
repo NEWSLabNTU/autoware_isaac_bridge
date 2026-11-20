@@ -54,7 +54,17 @@ class VehicleParams:
     # Suspension
     suspension_frequency: float = 1.6  # Hz
     suspension_damping_ratio: float = 0.45
-    suspension_travel: float = 0.2  # m
+    suspension_travel: float = 0.2  # m, the real one
+    # PhysX's wheel query (scensim issue 077): "raycast" (one ray down the wheel's centre) or
+    # "sweep" (the wheel's cylinder: it climbs a sharp curb, the raycast does not)
+    wheel_query: str = "raycast"
+    # PhysX's travel, m (0: suspension_travel). Longer: its frame rises by the difference, so
+    # the droop stays the real one and its rigid limit lies beyond the real travel, where the
+    # bump stop (aib.bump_stop) stops the wheel; the sweep needs it (issue 029: 0.50 m)
+    physx_travel: float = 0.0
+    bump_stop: float = 0.03  # m: the stop's engagement before full compression
+    bump_rate: float = 0.0  # N/m at full compression (0: 20 times the axle's spring)
+    bump_damping: float = 0.5  # the stop's damping ratio at full compression, on the corner
     # PhysX vehicle integration
     physx_substeps: int = 8
     substep_threshold_speed: float = 5.0
@@ -100,6 +110,10 @@ class VehicleParams:
             k = sprung * omega ** 2
             out.append((sprung, k, 2 * self.suspension_damping_ratio * math.sqrt(k * sprung)))
         return tuple(out), G / omega ** 2
+
+    def travels(self):
+        """(PhysX's travel, the real travel), m."""
+        return max(self.physx_travel, self.suspension_travel), self.suspension_travel
 
     def diagonal_inertia(self):
         lx, ly, lz = self.inertia_box

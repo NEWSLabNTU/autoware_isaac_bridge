@@ -37,6 +37,7 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
                                         VEHICLE_WHEEL_STATE_IS_ON_GROUND,
                                         VEHICLE_WHEEL_STATE_ROTATION_SPEED,
                                         VEHICLE_WHEEL_STATE_SUSPENSION_FORCE,
+                                        VEHICLE_WHEEL_STATE_SUSPENSION_JOUNCE,
                                         VEHICLE_WHEEL_STATE_TIRE_FORCE,
                                         VEHICLE_WHEEL_STATE_TIRE_LATERAL_DIRECTION,
                                         VEHICLE_WHEEL_STATE_TIRE_LATERAL_SLIP,
@@ -45,6 +46,7 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
+from ..bump_stop import BumpStop
 from ..control import Command, State, ackermann, release_sticky, truth_values
 from ..deps import use
 from ..frames import qconj, qmul, qrot
@@ -156,7 +158,10 @@ class Vehicle:
 
         v = PhysxSchema.PhysxVehicleAPI.Apply(prim)
         v.CreateVehicleEnabledAttr(True)
-        v.CreateSuspensionLineQueryTypeAttr(PhysxSchema.Tokens.raycast)
+        if p.wheel_query not in ("raycast", "sweep"):
+            raise ValueError(f"wheel_query {p.wheel_query!r}: raycast or sweep")
+        # PhysX takes the query type only when it creates the vehicle (issue 077)
+        v.CreateSuspensionLineQueryTypeAttr(getattr(PhysxSchema.Tokens, p.wheel_query))
         v.CreateSubStepThresholdLongitudinalSpeedAttr(p.substep_threshold_speed)
         v.CreateLowForwardSpeedSubStepCountAttr(p.physx_substeps)
         v.CreateHighForwardSpeedSubStepCountAttr(p.physx_substeps)
@@ -173,8 +178,23 @@ class Vehicle:
         r, half_t, L = p.wheel_radius, p.wheel_tread / 2, p.wheel_base
         (front_axle, rear_axle), sag = p.suspension()
         # The suspension frame sits so that, sagged under the static load, the wheel centre is
-        # at z = r: base_link on the ground at rest.
-        frame_z = r + (p.suspension_travel - sag)
+        # at z = r: base_link on the ground at rest. With PhysX's travel longer than the real
+        # one the frame rises by the difference: the droop is the real one, and the bump stop
+        # stops the wheel at the real travel, short of PhysX's rigid limit.
+        px_travel, real_travel = p.travels()
+        frame_z = r + (px_travel - sag)
+        self.frame_z = frame_z
+        self.bump = None  # aib.bump_stop.BumpStop, when PhysX's travel is the longer
+        self.bump_enabled = True  # a host with its own (scensim's road layer) turns it off
+        if px_travel > real_travel + 1e-9:
+            k_max = max(front_axle[1], rear_axle[1])
+            sprung = max(front_axle[0], rear_axle[0])
+            rate = p.bump_rate or 20.0 * k_max
+            # the stop's slope at full compression is 2 rate (aib.bump_stop)
+            self.bump = BumpStop(real_travel, p.bump_stop, rate,
+                                 2.0 * p.bump_damping * math.sqrt(2.0 * rate * sprung))
+        self.jounce = None  # per wheel after a step, m from full droop
+        self.bump_forces = None  # per wheel, N, the last step's stop forces (for traces)
         self.wheels = []
         self.wheel_paths = [f"{path}/{name}" for name, _, _ in WHEELS]
         self.wheel_states = None  # WheelState per wheel, after a step
@@ -220,7 +240,7 @@ class Vehicle:
             susp.CreateSprungMassAttr(sprung)
             susp.CreateSpringStrengthAttr(k)
             susp.CreateSpringDamperRateAttr(c)
-            susp.CreateTravelDistanceAttr(p.suspension_travel)
+            susp.CreateTravelDistanceAttr(px_travel)
             att.CreateIndexAttr(i)
             att.CreateSuspensionTravelDirectionAttr(Gf.Vec3f(0, 0, -1))
             att.CreateSuspensionFramePositionAttr(Gf.Vec3f(x, y, frame_z))
@@ -281,6 +301,9 @@ class Vehicle:
         self.tire_angle = 0.0
         self.torques = None  # the last step's sim_vehicle_ecu.Actuation
         self.last = None  # (position, quat, velocity in world) of the last substep
+        self.attach = [((L if is_front else 0.0), side * half_t, frame_z)
+                       for _, is_front, side in WHEELS]
+        self._force_at = None  # (simulation interface, stage id, body id), at the first force
 
     # --- Pose ------------------------------------------------------------------------------
 
@@ -304,6 +327,9 @@ class Vehicle:
         self.wheel_states = None
         self.contacts = None
         self.road_load.Set(Gf.Vec3f(0, 0, 0))
+        self.jounce = None
+        if self.bump is not None:
+            self.bump.reset()
         self.ecu.reset()
         self.truth_feed.reset()
         self.t = 0.0
@@ -331,6 +357,31 @@ class Vehicle:
             b.Set(brake)
             s.Set(angle)
         self.road_load.Set(Gf.Vec3f(road_load(p, state.velocity[0]), 0.0, 0.0))
+        self._apply_bump_stop(dt)
+
+    def _apply_bump_stop(self, dt):
+        """The bump stop's force at each wheel's attachment, along the body's z, for the coming
+        step (PhysX clears a force applied at a position after each step)."""
+        if self.bump is None or not self.bump_enabled or self.jounce is None or self.last is None:
+            return
+        forces = self.bump.step(self.jounce, dt)
+        self.bump_forces = forces
+        if not any(forces):
+            return
+        if self._force_at is None:
+            import omni.physx
+            import omni.usd
+            from pxr import PhysicsSchemaTools
+            self._force_at = (omni.physx.get_physx_simulation_interface(),
+                              omni.usd.get_context().get_stage_id(),
+                              PhysicsSchemaTools.sdfPathToInt(self.path))
+        sim, stage_id, body = self._force_at
+        pos, q, _ = self.last
+        up = qrot(q, (0.0, 0.0, 1.0))
+        for f, a in zip(forces, self.attach):
+            if f > 0.0:
+                at = tuple(c + d for c, d in zip(pos, qrot(q, a)))
+                sim.apply_force_at_pos(stage_id, body, tuple(f * u for u in up), at)
 
     def sensors(self, state: State):
         """What the car's own sensors read after the last step: the wheel speed sensors and
@@ -372,7 +423,7 @@ class Vehicle:
     def _wheel_states(self, physx):
         """Each wheel's spin and longitudinal slip, and where it touches the ground, after the
         step (None, None if PhysX has none)."""
-        out, contacts = [], []
+        out, contacts, jounce = [], [], []
         for wp in self.wheel_paths:
             try:
                 w = physx.get_wheel_state(wp)
@@ -381,6 +432,7 @@ class Vehicle:
             if not w:
                 return None, None
             on_ground = bool(w[VEHICLE_WHEEL_STATE_IS_ON_GROUND])
+            jounce.append(float(w[VEHICLE_WHEEL_STATE_SUSPENSION_JOUNCE]))
             f = w[VEHICLE_WHEEL_STATE_TIRE_FORCE]
             out.append(WheelState(
                 float(w[VEHICLE_WHEEL_STATE_ROTATION_SPEED]),
@@ -397,6 +449,7 @@ class Vehicle:
                     tuple(float(c) for c in w[VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION])))
             else:
                 contacts.append(Contact())
+        self.jounce = jounce
         return out, contacts
 
     def sample(self, physx, dt, state: State):
