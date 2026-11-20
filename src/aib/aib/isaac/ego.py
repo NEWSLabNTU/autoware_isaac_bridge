@@ -39,7 +39,7 @@ class Ego:
         self.name = name
         self.path = path
         self.ros = ros
-        self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.ecu,
+        self.vehicle = Vehicle(stage, path, params or rig.vehicle, rig.make_component(),
                                box_center or rig.box_center, box_dims or rig.box_dims, pose,
                                ground_clearance=rig.ground_clearance)
         self.state = State()

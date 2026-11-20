@@ -45,14 +45,15 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
 from omni.physx.scripts.utils import set_custom_metadata
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
 
-from ..control import Command, State, ackermann, driven_wheels, release_sticky
+from ..control import Command, State, ackermann, release_sticky
 from ..deps import use
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams, road_load
 
 use("sim_vehicle_ecu")
 
-from sim_vehicle_ecu import Calibration, Ecu, Request, Sensors  # noqa: E402
+from sim_vehicle_ecu import Calibration, Request, Sensors  # noqa: E402
+from sim_vehicle_ecu import component as components  # noqa: E402
 
 GROUPS = "/World/vehicleCollisionGroups"
 PLATE_THICKNESS = 0.04  # m, the skid plate (its bottom is what counts)
@@ -101,17 +102,27 @@ def ensure_vehicle_scene(stage):
 
 
 class Vehicle:
-    def __init__(self, stage, path, params: VehicleParams, calibration: Calibration, box_center,
+    def __init__(self, stage, path, params: VehicleParams, component, box_center,
                  box_dims, pose, ground_clearance=0.0):
-        """`params`: the PhysX vehicle (a rig's `vehicle`); `calibration`: its onboard
-        computers' (a rig's `ecu`); `ground_clearance`: the underbody's height (a rig's), where
-        a skid plate goes (0: none)."""
+        """`params`: the PhysX vehicle (a rig's `vehicle`); `component`: its control component
+        (scensim roadmap 091: a rig's `make_component()`, sim_vehicle_ecu's interface), or a
+        `Calibration` for the shipped onboard computers on it; `ground_clearance`: the
+        underbody's height (a rig's), where a skid plate goes (0: none)."""
         self.stage = stage
         self.path = path
         self.p = p = params
-        self.ecu = Ecu(calibration)
-        self.brake_floor = calibration.brake_floor
-        self.driven = driven_wheels(calibration.powertrain, calibration.drive_axle)
+        if isinstance(component, Calibration):
+            component = components.EcuComponent.from_calibration(component)
+        components.check(component)
+        if component.commands != "autoware":
+            raise ValueError(f"control component takes {component.commands!r} commands; this "
+                             "vehicle interface gives Autoware's (the others come with scensim "
+                             "roadmap 091 step 5)")
+        if not hasattr(component, "debug"):
+            component.debug = {}  # what the recorder reads of the shipped ones
+        self.ecu = component  # the name the hosts read (`debug`) and reset
+        self.brake_floor = float(getattr(component, "brake_floor", Calibration.brake_floor))
+        self.driven = tuple(bool(d) for d in getattr(component, "driven", (True,) * 4))
         ensure_vehicle_scene(stage)
         root = UsdGeom.Xform.Define(stage, path)
         prim = root.GetPrim()
@@ -296,7 +307,7 @@ class Vehicle:
         the car's sensors as the last step left them, through the onboard computers."""
         p = self.p
         request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
-        self.torques = act = self.ecu.step(request, self.sensors(state), dt)
+        self.torques = act = components.checked(self.ecu.step(request, self.sensors(state), dt))
         self.tire_angle = act.tire_angle
         if p.ackermann:
             left, right = ackermann(self.tire_angle, p.wheel_base, p.wheel_tread)

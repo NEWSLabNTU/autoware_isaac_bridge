@@ -119,7 +119,15 @@ nothing PhysX knows that a car's sensors do not.
 
 Its calibration comes from the spec the rig names (`Rig.ecu`, `sim_vehicle_ecu.Calibration`),
 refused when the spec's `spec_hash` is not the rig's; an ego config's `ecu:` overrides fields by
-name. The rest of this section is the drive unit as it moved (aib `1d49569`); the slip it
+name.
+
+What the vehicle steps is a control component (`sim_vehicle_ecu.component`, scensim roadmap 091):
+`Rig.make_component()` gives the shipped onboard computers on that calibration, or the user's own
+when the spec's `powertrain.model` is `component` or the ego config names one (`component:
+{entry_point, params}`; `aib.steptest --component <name>`). It is found by its entry point in
+group `scensim.vehicle_components` on the interpreter's path, takes Autoware's request (others
+come with scensim 091 step 5), and its actuation is checked every step (shape, finite values).
+Its `driven` wheels and `brake_floor` feed `release_sticky`. The rest of this section is the drive unit as it moved (aib `1d49569`); the slip it
 names is the estimate since then.
 
 ### Powertrain

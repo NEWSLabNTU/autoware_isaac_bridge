@@ -277,6 +277,8 @@ def main(argv=None):
     ap.add_argument("--world", default="")
     ap.add_argument("--only", default="")
     ap.add_argument("--label", default="")
+    ap.add_argument("--component", default="",
+                    help="a control component's entry point in place of the spec's (scensim 091)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -297,6 +299,8 @@ def main(argv=None):
         (vehicle if k in physx_fields else ecu)[k] = (
             json.loads(v) if v[:1] in "-0123456789tf[" else v)
     cfg.vehicle, cfg.ecu = vehicle, ecu
+    if args.component:
+        cfg.component = {"entry_point": args.component}
     overrides = {**vehicle, **ecu}
     rig = cfg.load_rig()
     params = rig.vehicle
@@ -307,7 +311,7 @@ def main(argv=None):
         return (-road_load(params, v)
                 + 4 * params.wheel_damping_rate * v / params.wheel_radius ** 2) / m
     _EXPECT[0] = expected
-    label = args.label or rig.ecu.powertrain
+    label = args.label or args.component or rig.ecu.powertrain
     out = Path(args.out) / label
     out.mkdir(parents=True, exist_ok=True)
     os.environ.pop("DISPLAY", None)
@@ -338,7 +342,8 @@ def main(argv=None):
     world.play()
     physx = omni.physx.get_physx_interface()
     pose = ((0.0, 0.0, 0.05), (1.0, 0.0, 0.0, 0.0))
-    veh = Vehicle(stage, "/World/ego", params, rig.ecu, rig.box_center, rig.box_dims, pose)
+    veh = Vehicle(stage, "/World/ego", params, rig.make_component(), rig.box_center,
+                  rig.box_dims, pose)
     log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
              SUB, dt)
     summary = {"powertrain": rig.ecu.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},
@@ -374,7 +379,7 @@ def main(argv=None):
                 t += FRAME
                 vx = state.velocity[0]
                 ws = veh.wheel_states or [None] * 4
-                dbg = veh.ecu.debug
+                dbg = getattr(veh.ecu, "debug", {})
                 tq = veh.torques
                 row = {"t": round(t, 3), "v": vx, "a": (vx - v_prev) / FRAME,
                        "x": state.position[0] - x0, "y": state.position[1],

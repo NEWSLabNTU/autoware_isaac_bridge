@@ -190,6 +190,8 @@ vehicle-check *args:
 #   out:=<dir>          where the CSVs and summary.json go (default play_log/steptest, here)
 #   powertrain:=<model> override the calibration's (ev, ideal)
 #   only:=a,b           some of: launch brake_100 regen_60 steps accel_brake hard_brake limit_brake
+#   component:=<name>   a control component's entry point in place of the spec's (its package
+#                       on PYTHONPATH; scensim roadmap 091)
 #   set:=k=v            a VehicleParams or Calibration override (JSON values; repeat for more);
 #                       label:=<name> the
 #                       run's subdirectory
@@ -206,6 +208,7 @@ isaac-steptest *args:
             label:=*) extra+=(--label "${a#label:=}") ;;
             world:=*) extra+=(--world "${a#world:=}") ;;
             set:=*) extra+=(--set "${a#set:=}") ;;
+            component:=*) extra+=(--component "${a#component:=}") ;;
             *) echo "unknown argument $a" >&2; exit 2 ;;
         esac
     done

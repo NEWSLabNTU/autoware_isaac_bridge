@@ -239,3 +239,60 @@ class SensorKitLaunchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_rig_makes_its_control_component(tmp_path, monkeypatch):
+    """scensim roadmap 091 step 2: a rig's car steps a control component; by default the shipped
+    onboard computers on the rig's calibration (its overrides kept), else a run's own, found by
+    entry point from a workspace outside aib."""
+    import sys
+    import textwrap
+
+    import pytest
+    from sim_vehicle_ecu import component as components
+
+    r = Rig.load(RIG, None, None, {"esc_enabled": True})
+    c = r.make_component()
+    assert isinstance(c, components.EcuComponent) and c.calibration is r.ecu
+    assert c.calibration.esc_enabled and c.commands == "autoware"
+
+    site = tmp_path / "site"
+    (site / "my_racer_model").mkdir(parents=True)
+    (site / "my_racer_model" / "__init__.py").write_text(textwrap.dedent('''
+        class Sample:
+            commands = "autoware"
+            driven = (False, False, True, True)
+
+            def __init__(self, vehicle, params, seed):
+                self.vehicle, self.params, self.seed = vehicle, params, seed
+
+            def reset(self):
+                pass
+
+            def step(self, command, sensors, dt):
+                raise AssertionError("not stepped here")
+    '''))
+    info = site / "my_racer_model-0.1.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: my-racer-model\nVersion: 0.1.0\n")
+    (info / "entry_points.txt").write_text(
+        "[scensim.vehicle_components]\nmy_racer.sample = my_racer_model:Sample\n")
+    monkeypatch.syspath_prepend(str(site))
+    try:
+        r = Rig.load(RIG, component={"entry_point": "my_racer.sample", "params": {"k": 2}})
+        c = r.make_component(seed=5)
+        assert type(c).__name__ == "Sample" and c.params == {"k": 2} and c.seed == 5
+        assert c.vehicle["name"] == r.spec["name"]
+        with pytest.raises(ValueError, match="component: {entry_point"):
+            Rig.load(RIG, component={"name": "my_racer.sample"})
+        with pytest.raises(components.ComponentError, match="no control component 'nope'"):
+            Rig.load(RIG, component={"entry_point": "nope"}).make_component()
+    finally:
+        sys.modules.pop("my_racer_model", None)
+
+
+def test_an_ego_config_names_a_component(tmp_path):
+    cfg_path = tmp_path / "ego.yaml"
+    cfg_path.write_text(f"rig: {RIG}\ncomponent: {{entry_point: my_racer.sample}}\n")
+    cfg = EgoConfig.load(cfg_path)
+    assert cfg.component == {"entry_point": "my_racer.sample"}

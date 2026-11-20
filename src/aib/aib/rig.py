@@ -21,6 +21,7 @@ from .params import VehicleParams
 use("sim_vehicle_spec", "sim_vehicle_ecu")
 
 from sim_vehicle_ecu import Calibration  # noqa: E402
+from sim_vehicle_ecu import component as components  # noqa: E402
 
 SENSOR_OVERRIDES = ("enabled", "topic", "frame", "rate_hz", "isaac", "auto_exposure")
 
@@ -61,9 +62,23 @@ class Rig:
     assumptions: list = field(default_factory=list)
     spec_hash: str = ""  # the sim_vehicle_spec spec this rig was generated from
     path: str = ""
+    spec: dict = field(default_factory=dict)  # that spec's document (the component's car)
+    # a run's control component in place of the spec's (scensim roadmap 091):
+    # {entry_point, params}; empty: the spec's
+    component: dict = field(default_factory=dict)
+
+    def make_component(self, seed=0):
+        """The car's control component (sim_vehicle_ecu.component): a run's, else the spec's
+        `component` powertrain, else the shipped onboard computers on this rig's calibration
+        (its ego config's `ecu` overrides applied)."""
+        model = (self.spec.get("powertrain") or {}).get("model")
+        if self.component or model == "component":
+            return components.for_spec(self.spec, seed=seed, component=self.component or None)
+        return components.EcuComponent.from_calibration(self.ecu)
 
     @classmethod
-    def load(cls, path, vehicle_overrides=None, sensor_overrides=None, ecu_overrides=None):
+    def load(cls, path, vehicle_overrides=None, sensor_overrides=None, ecu_overrides=None,
+             component=None):
         import yaml
 
         path = Path(path)
@@ -98,10 +113,15 @@ class Rig:
                                       **core)
         body = doc.get("body") or {}
         spec_hash = str(doc.get("spec_hash") or "")
+        spec = spec_doc(path, doc.get("spec"), spec_hash)
+        if component and (set(component) - {"entry_point", "params"}
+                          or not component.get("entry_point")):
+            raise ValueError(f"component: {{entry_point: <name>, params: {{...}}}}, is "
+                             f"{component!r}")
         return cls(name=doc.get("name", path.stem),
                    vehicle=VehicleParams.from_dict(doc.get("vehicle"), vehicle_overrides),
-                   ecu=Calibration.from_spec(spec_doc(path, doc.get("spec"), spec_hash),
-                                             ecu_overrides),
+                   ecu=Calibration.from_spec(spec, ecu_overrides),
+                   spec=spec, component=dict(component or {}),
                    box_center=tuple(body.get("box_center", (1.5, 0.0, 0.75))),
                    box_dims=tuple(body.get("box_dims", (4.8, 2.1, 1.5))),
                    catalogue_model=body.get("catalogue_model", ""),
@@ -165,6 +185,9 @@ class EgoConfig:
     node_name: str = "isaac_vehicle"
     vehicle: dict = field(default_factory=dict)  # VehicleParams overrides, by field name
     ecu: dict = field(default_factory=dict)  # sim_vehicle_ecu.Calibration overrides, by name
+    # the car's control component in place of its spec's (scensim roadmap 091):
+    # {entry_point, params}; {}: the spec's
+    component: dict = field(default_factory=dict)
     sensors: dict = field(default_factory=dict)  # sensor name -> overrides (SENSOR_OVERRIDES)
     # Where the vehicle takes Autoware's Control from. Another topic puts a node between
     # Autoware's command gate and the car (autoware-drift's drift_controller, scensim roadmap 057).
@@ -220,4 +243,4 @@ class EgoConfig:
         return cfg
 
     def load_rig(self):
-        return Rig.load(self.rig, self.vehicle, self.sensors, self.ecu)
+        return Rig.load(self.rig, self.vehicle, self.sensors, self.ecu, self.component)
