@@ -319,3 +319,29 @@ def test_truth_values_are_the_declared_inputs_only():
     assert truth_values(st, None, ()) == {}
     with pytest.raises(ValueError, match="no ground truth 'mind'"):
         truth_values(st, wheels, ("mind",))
+
+
+def test_a_component_s_paths_reach_the_interpreter(tmp_path):
+    """scensim 091 W3: the ego config names where the component's package is (a workspace's
+    site-packages, built for another Python); the rig puts it on sys.path before looking it up."""
+    import sys
+
+    site = tmp_path / "ws" / "install" / "my_racer_model" / "lib" / "python3.10" / "site-packages"
+    (site / "my_racer_paths").mkdir(parents=True)
+    (site / "my_racer_paths" / "__init__.py").write_text(
+        "class Sample:\n    commands = 'autoware'\n\n    def __init__(self, vehicle, params, seed):\n"
+        "        pass\n\n    def reset(self):\n        pass\n\n    def step(self, c, s, dt):\n"
+        "        return None\n")
+    info = site / "my_racer_paths-0.1.0.egg-info"   # what colcon's setup.py install writes
+    info.mkdir()
+    (info / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: my-racer-paths\nVersion: 0.1.0\n")
+    (info / "entry_points.txt").write_text(
+        "[scensim.vehicle_components]\nmy_racer.paths = my_racer_paths:Sample\n")
+    try:
+        r = Rig.load(RIG, component={"entry_point": "my_racer.paths", "paths": [str(site)]})
+        assert type(r.make_component()).__name__ == "Sample"
+        assert str(site) in sys.path
+    finally:
+        sys.modules.pop("my_racer_paths", None)
+        if str(site) in sys.path:
+            sys.path.remove(str(site))
