@@ -194,6 +194,22 @@ class MiscTest(unittest.TestCase):
         self.assertEqual(fired, [0.0, 0.1, 0.2])
         self.assertTrue(all(Periodic(0).due(t) for t in (0.0, 0.0, 0.01)))
 
+    def test_periodic_keeps_its_rate_off_the_frame_grid(self):
+        """Issue 002: a 30 Hz camera on 10 ms frames published at 25 Hz (every 4th frame)."""
+        p = Periodic(1 / 30)
+        frames = [k * 0.01 for k in range(1000)]  # 10 s
+        fired = [t for t in frames if p.due(t)]
+        self.assertIn(len(fired), (300, 301))
+        gaps = {round(b - a, 3) for a, b in zip(fired, fired[1:])}
+        self.assertEqual(gaps, {0.03, 0.04})
+        # after a stall it restarts from the frame, once, with no burst of catch-up frames
+        p = Periodic(1 / 30)
+        self.assertTrue(p.due(0.0))
+        self.assertTrue(p.due(1.0))
+        self.assertFalse(p.due(1.01))
+        self.assertFalse(p.due(1.02))
+        self.assertTrue(p.due(1.04))
+
 
 
 

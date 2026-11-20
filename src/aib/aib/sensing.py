@@ -211,7 +211,12 @@ def sample_index(times, t):
 
 
 class Periodic:
-    """Fires at most every `period` s of sim time (0: every frame)."""
+    """Fires at most once per frame, every `period` s of sim time on average (0: every frame).
+
+    The next deadline is counted from the last deadline, not from the frame that fired, so a
+    period that is not a whole number of frames keeps its rate: 30 Hz on 10 ms frames fires
+    3-3-4 frames apart, not every 4th frame (25 Hz; issue 002). After a gap of more than a
+    period (the first frame, a reset, a stall) it restarts from the frame, with no burst."""
 
     def __init__(self, period):
         self.period = float(period)
@@ -221,7 +226,8 @@ class Periodic:
         if self.period <= 0:
             return True
         if t + 1e-9 >= self.next:
-            self.next = t + self.period
+            nxt = self.next + self.period
+            self.next = nxt if t + 1e-9 < nxt else t + self.period
             return True
         return False
 
