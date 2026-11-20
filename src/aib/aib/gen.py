@@ -61,6 +61,15 @@ def vehicle_params(spec):
         suspension_frequency=su["frequency"], suspension_damping_ratio=su["damping_ratio"],
         suspension_travel=su["travel"],
     )
+    # Per-axle tyres and the body's contact (scensim roadmap 091 W24), when the spec has them
+    names_t = {"friction": "tire_friction"}
+    axles = {a: {names_t.get(k, k): v for k, v in t[a].items()} for a in ("front", "rear")
+             if t.get(a)}
+    if axles:
+        values["axle_tires"] = axles
+    contact = spec.section("body").get("contact")
+    if contact:
+        values["contact"] = dict(contact)
     # No `resistance` section: no road load (a spec says what its car has).
     for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
         values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)

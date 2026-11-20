@@ -17,7 +17,7 @@ force, contact) are read back for the sensors and the host's surface layer.
 
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, the
-rig's `tire_friction` until a host writes another (`set_wheel_friction`). A host with a
+its axle's `tire_friction` (`Vehicle.tire_frictions`) until a host writes another (`set_wheel_friction`). A host with a
 surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
 ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
 inputs of scensim's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
@@ -44,7 +44,7 @@ from omni.physx.bindings._physx import (VEHICLE_WHEEL_STATE_GROUND_HIT_POSITION,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_DIRECTION,
                                         VEHICLE_WHEEL_STATE_TIRE_LONGITUDINAL_SLIP)
 from omni.physx.scripts.utils import set_custom_metadata
-from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics
+from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics, UsdShade
 
 from ..bump_stop import BumpStop
 from ..control import Command, State, ackermann, release_sticky, truth_values
@@ -85,6 +85,27 @@ class Contact(NamedTuple):
     shape: str = ""  # the collider's prim path ("" when off the ground)
     load: float = 0.0  # the suspension force's magnitude, N: what the ground carries
     direction: tuple = (1.0, 0.0, 0.0)  # the tire's rolling direction, world frame, unit
+
+
+def bind_contact(stage, path, contact, prims):
+    """A physics material at `path` from a contact mapping (restitution, static_friction,
+    dynamic_friction, combine), bound with the physics purpose on `prims`; its path."""
+    mat = UsdShade.Material.Define(stage, path)
+    api = UsdPhysics.MaterialAPI.Apply(mat.GetPrim())
+    if "restitution" in contact:
+        api.CreateRestitutionAttr(float(contact["restitution"]))
+    if "static_friction" in contact:
+        api.CreateStaticFrictionAttr(float(contact["static_friction"]))
+    if "dynamic_friction" in contact:
+        api.CreateDynamicFrictionAttr(float(contact["dynamic_friction"]))
+    if "combine" in contact:
+        px = PhysxSchema.PhysxMaterialAPI.Apply(mat.GetPrim())
+        px.CreateFrictionCombineModeAttr(contact["combine"])
+        px.CreateRestitutionCombineModeAttr(contact["combine"])
+    for prim in prims:
+        UsdShade.MaterialBindingAPI.Apply(prim).Bind(
+            mat, UsdShade.Tokens.weakerThanDescendants, "physics")
+    return mat.GetPath()
 
 
 def ensure_vehicle_scene(stage):
@@ -204,7 +225,10 @@ class Vehicle:
         self.wheel_states = None  # WheelState per wheel, after a step
         self.contacts = None  # Contact per wheel, after a step
         self.friction = []  # each wheel's table's defaultFrictionValue attribute
-        self.friction_values = [p.tire_friction] * len(WHEELS)
+        # each wheel's axle's tyre (scensim roadmap 091 W24: tires.front, tires.rear)
+        self.wheel_tires = [p.wheel_tire(is_front) for _, is_front, _ in WHEELS]
+        self.tire_frictions = [float(t["tire_friction"]) for t in self.wheel_tires]  # the bases
+        self.friction_values = list(self.tire_frictions)
         self.tires = []  # each wheel's PhysxVehicleTireAPI
         self.tire_base = []  # each wheel's rig (lateral graph (x, y), longitudinal) stiffness
         self.stiffness_values = [(1.0, 1.0)] * len(WHEELS)  # shares of tire_base, as written
@@ -225,20 +249,20 @@ class Vehicle:
             wheel.CreateDampingRateAttr(p.wheel_damping_rate)
             # PhysX tire: lateral stiffness rises with load up to lat_stiff_max_load rest
             # loads, where it is lat_stiff_value per N of rest load; longitudinal per g.
+            wt = self.wheel_tires[i]
+            lat = (float(wt["lat_stiff_max_load"]), float(wt["lat_stiff_value"]) * rest_load)
             tire = PhysxSchema.PhysxVehicleTireAPI.Apply(wprim)
-            tire.CreateLateralStiffnessGraphAttr(
-                Gf.Vec2f(p.lat_stiff_max_load, p.lat_stiff_value * rest_load))
-            tire.CreateLongitudinalStiffnessAttr(p.long_stiff_value * G)
+            tire.CreateLateralStiffnessGraphAttr(Gf.Vec2f(*lat))
+            tire.CreateLongitudinalStiffnessAttr(float(wt["long_stiff_value"]) * G)
             tire.CreateCamberStiffnessAttr(0.0)
             self.tires.append(tire)
-            self.tire_base.append(((p.lat_stiff_max_load, p.lat_stiff_value * rest_load),
-                                   p.long_stiff_value * G))
+            self.tire_base.append((lat, float(wt["long_stiff_value"]) * G))
             tire.CreateFrictionVsSlipGraphAttr([Gf.Vec2f(*pt) for pt in p.friction_vs_slip])
             table = PhysxSchema.PhysxVehicleTireFrictionTable.Define(
                 stage, f"{TIRE_FRICTION}/{path.strip('/').replace('/', '_')}/{name}")
             table.CreateGroundMaterialsRel()
             table.CreateFrictionValuesAttr([])
-            self.friction.append(table.CreateDefaultFrictionValueAttr(p.tire_friction))
+            self.friction.append(table.CreateDefaultFrictionValueAttr(self.tire_frictions[i]))
             tire.CreateFrictionTableRel().AddTarget(table.GetPath())
             susp = PhysxSchema.PhysxVehicleSuspensionAPI.Apply(wprim)
             susp.CreateSprungMassAttr(sprung)
@@ -302,6 +326,13 @@ class Vehicle:
                 .CreateIncludesRel().AddTarget(plate.GetPath())
             UsdGeom.Imageable(plate.GetPrim()).MakeInvisible()
             self.plate_path = plate.GetPath()
+        # The body's contact material (W24): on the body and the skid plate, both of what the
+        # chassis meets walls, objects and rocks with. None: PhysX's default material.
+        self.contact_path = None
+        if p.contact:
+            self.contact_path = bind_contact(stage, f"{path}/contact_material", p.contact,
+                                             [cube.GetPrim()] + ([plate.GetPrim()]
+                                                                 if self.plate_path else []))
         self.tire_angle = 0.0
         self.torques = None  # the last step's sim_vehicle_ecu.Actuation
         self.last = None  # (position, quat, velocity in world) of the last substep

@@ -12,7 +12,7 @@ Defaults are the shipped spec's (sim_vehicle_spec's vehicles/tesla_model3.yaml) 
 `VehicleParams()` is the same car; the spec, not these defaults, is the source of truth.
 """
 import math
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 
 G = 9.81
 # How far two descriptions of one car may disagree on wheel base, tread or radius, m.
@@ -45,6 +45,12 @@ class VehicleParams:
     lat_stiff_value: float = 17.0
     long_stiff_value: float = 4612.5
     friction_vs_slip: tuple = ((0.0, 1.0), (0.1, 1.0), (1.0, 0.8))
+    # One axle's tyres where they differ from the fields above (scensim roadmap 091 W24):
+    # {"front"|"rear": {AXLE_TIRE_FIELDS: value}}; empty: both axles alike
+    axle_tires: dict = field(default_factory=dict)
+    # The body's physics material against walls and objects (W24): restitution,
+    # static_friction, dynamic_friction, combine; empty: the simulator's default material
+    contact: dict = field(default_factory=dict)
     # Road loads, applied to the body as a force (`road_load`)
     rolling_coefficient: float = 0.0095  # Crr
     drag_coefficient: float = 0.23  # Cd
@@ -84,6 +90,25 @@ class VehicleParams:
     # start held for good; 1 N m is ~0.003 m/s^2 on a Model 3)
     release_torque: float = 1.0  # N m per driven wheel
 
+    def __post_init__(self):
+        for axle, over in (self.axle_tires or {}).items():
+            if axle not in ("front", "rear"):
+                raise ValueError(f"axle_tires: {axle!r}: front or rear")
+            unknown = set(over) - set(AXLE_TIRE_FIELDS)
+            if unknown:
+                raise ValueError(f"axle_tires.{axle}: unknown field(s) {sorted(unknown)}; "
+                                 f"known: {list(AXLE_TIRE_FIELDS)}")
+        unknown = set(self.contact or {}) - set(CONTACT_FIELDS)
+        if unknown:
+            raise ValueError(f"contact: unknown field(s) {sorted(unknown)}; "
+                             f"known: {list(CONTACT_FIELDS)}")
+
+    def wheel_tire(self, front):
+        """One axle's tyre: {AXLE_TIRE_FIELDS: value}, its override on the car's."""
+        out = {k: getattr(self, k) for k in AXLE_TIRE_FIELDS}
+        out.update((self.axle_tires or {}).get("front" if front else "rear") or {})
+        return out
+
     @classmethod
     def from_dict(cls, values, overrides=None):
         """`values` (a rig's `vehicle:`), then `overrides`; unknown names are refused."""
@@ -95,7 +120,10 @@ class VehicleParams:
         return cls(**{k: _tuple(v) for k, v in merged.items()})
 
     def to_dict(self):
-        return {k: _list(v) for k, v in asdict(self).items()}
+        """The rig's `vehicle:`. An empty axle_tires or contact is left out, so a car without
+        them writes the rig it wrote before them."""
+        return {k: _list(v) for k, v in asdict(self).items()
+                if not (k in ("axle_tires", "contact") and not v)}
 
     # --- derived ---------------------------------------------------------------------------
 
@@ -130,6 +158,11 @@ class VehicleParams:
         s = self.mass / 12.0
         return ((ly * ly + lz * lz) * s, (lx * lx + lz * lz) * s, (lx * lx + ly * ly) * s)
 
+
+# The tyre fields an axle may set apart (sim_vehicle_spec's tires.front, tires.rear)
+AXLE_TIRE_FIELDS = ("tire_friction", "lat_stiff_max_load", "lat_stiff_value", "long_stiff_value")
+# The body's contact material (sim_vehicle_spec's body.contact)
+CONTACT_FIELDS = ("restitution", "static_friction", "dynamic_friction", "combine")
 
 # With the sweep and no physx_travel, PhysX's travel is this many times the real one: at 2.0 the
 # Model 3's sweep still threw the car off a 10 cm cleat at 20 m/s, at 2.5 not (scensim issue 077)

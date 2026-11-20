@@ -122,3 +122,44 @@ class PlanarLidarTest(unittest.TestCase):
                                 "range_min": 0.06, "topic": "/scan"})
         s = laser_scan_settings(scan, prof)
         self.assertEqual((s["beams"], s["topic"], s["range_max"]), (1081, "/scan", 10.0))
+
+
+class ContactPropertiesTest(unittest.TestCase):
+    """scensim 091 W24: a spec's per-axle tyres and body contact reach the rig; without them
+    the rig is the one written before (the shipped rigs are unchanged, CheckTest)."""
+
+    def rig_of(self, edit):
+        doc = yaml.safe_load(SPEC.read_text())
+        edit(doc)
+        with tempfile.TemporaryDirectory() as d:
+            spec_path = Path(d) / SPEC.name
+            spec_path.write_text(yaml.safe_dump(doc))
+            return yaml.safe_load(gen.rig(gen.specmod.load(spec_path), "x", "x"))["vehicle"]
+
+    def test_none_writes_nothing(self):
+        v = self.rig_of(lambda d: None)
+        self.assertNotIn("axle_tires", v)
+        self.assertNotIn("contact", v)
+
+    def test_axle_tyres_and_contact_reach_the_rig(self):
+        def edit(d):
+            d["tires"]["rear"] = {"friction": 1.1, "lat_stiff_value": 30.0}
+            d.setdefault("body", {})["contact"] = {"restitution": 0.3, "combine": "min"}
+        v = self.rig_of(edit)
+        self.assertEqual(v["axle_tires"], {"rear": {"tire_friction": 1.1, "lat_stiff_value": 30.0}})
+        self.assertEqual(v["contact"], {"restitution": 0.3, "combine": "min"})
+        from aib.params import VehicleParams
+        p = VehicleParams.from_dict(v)
+        self.assertEqual(p.wheel_tire(False)["tire_friction"], 1.1)
+        self.assertEqual(p.wheel_tire(False)["lat_stiff_value"], 30.0)
+        self.assertEqual(p.wheel_tire(True)["tire_friction"], p.tire_friction)
+        self.assertEqual(p.wheel_tire(True)["long_stiff_value"], p.long_stiff_value)
+
+    def test_unknown_fields_are_refused(self):
+        from aib.params import VehicleParams
+        with self.assertRaises(ValueError):
+            VehicleParams(axle_tires={"middle": {"tire_friction": 1.0}})
+        with self.assertRaises(ValueError):
+            VehicleParams(axle_tires={"rear": {"friction_vs_slip": ((0.0, 1.0),)}})
+        with self.assertRaises(ValueError):
+            VehicleParams(contact={"bounce": 0.2})
