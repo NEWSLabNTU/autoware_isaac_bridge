@@ -345,3 +345,18 @@ def test_a_component_s_paths_reach_the_interpreter(tmp_path):
         sys.modules.pop("my_racer_paths", None)
         if str(site) in sys.path:
             sys.path.remove(str(site))
+
+
+def test_a_component_s_files_are_relative_to_the_spec(monkeypatch):
+    """scensim 091 W4: the fmu component's unit (params.fmu) is named relative to the spec, so
+    the rig hands its spec's directory to the component as `base`."""
+    from pathlib import Path
+
+    from sim_vehicle_ecu import component as components
+
+    seen = {}
+    monkeypatch.setattr(components, "for_spec",
+                        lambda spec, seed=0, component=None, base=None: seen.update(base=base) or "c")
+    r = Rig.load(RIG, component={"entry_point": "fmu", "params": {"fmu": "models/racer.fmu"}})
+    assert Path(r.spec_file).is_file() and Path(r.spec_file).name.endswith((".yaml", ".yml"))
+    assert r.make_component() == "c" and seen["base"] == str(Path(r.spec_file).parent)
