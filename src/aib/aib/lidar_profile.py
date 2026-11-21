@@ -60,6 +60,22 @@ def planar(sensor, name):
     return prof, scan
 
 
+TICK_RATE = "omni:sensor:tickRate"
+
+
+def tick_rate(p, authored):
+    """The OmniLidar's `omni:sensor:tickRate` for profile `p`, over the stock variant's
+    `authored` one, or None when it is already that (scensim issue 099): the profile's scan
+    rate. The variant's (20 Hz) was left in place while its scan rate was set, a mismatch
+    Isaac's own lidar wrapper warns about. A profile turning faster than it ticked (the
+    RoboRacer's 40 Hz on 20) handed tails of revolutions under 40 Hz frames: /scan at 33 Hz,
+    a third of its beams missing."""
+    rate = float(p["rate_hz"])
+    if authored is not None and float(authored) == rate:
+        return None
+    return rate
+
+
 def elevations(p):
     """Each ring's elevation in degrees, ring 0 the highest, as CARLA fires them."""
     return np.linspace(p["upper_fov"], p["lower_fov"], p["channels"]).tolist()

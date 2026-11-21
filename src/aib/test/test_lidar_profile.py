@@ -160,3 +160,12 @@ def test_a_planar_profile_has_one_ring():
     assert lp.check(np.zeros(1000), p) is None
     assert "off the plane" in lp.check(np.r_[np.zeros(900), np.full(100, 0.5)], p)
     assert lp.rings(np.zeros(5), p).tolist() == [0] * 5
+
+
+def test_the_lidar_ticks_at_its_scan_rate():
+    """Issue 099: the stock variant's 20 Hz tick is replaced by the profile's scan rate."""
+    from aib.lidar_profile import tick_rate
+    assert tick_rate({"rate_hz": 40.0}, 20.0) == 40.0
+    assert tick_rate({"rate_hz": 10.0}, 20.0) == 10.0
+    assert tick_rate({"rate_hz": 10.0}, 10.0) is None
+    assert tick_rate({"rate_hz": 10.0}, None) == 10.0

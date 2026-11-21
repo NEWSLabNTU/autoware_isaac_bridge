@@ -128,6 +128,16 @@ class Lidar:
                             raise RuntimeError(f"lidar {rig.name}: the OmniLidar at "
                                                f"{lidar.paths[0]} has no {name}")
                         attr.Set(value)
+                    tick = prim.GetAttribute(lidarprof.TICK_RATE)
+                    authored = tick.Get() if tick else None
+                    new_tick = lidarprof.tick_rate(prof, authored)
+                    if new_tick is not None:
+                        if not tick:
+                            raise RuntimeError(f"lidar {rig.name}: the OmniLidar at "
+                                               f"{lidar.paths[0]} has no {lidarprof.TICK_RATE}")
+                        tick.Set(new_tick)
+                        log.info("lidar %s: ticks at %g Hz, its scan rate (the variant ticked at "
+                                 "%s)", rig.name, new_tick, authored)
                     log.info("lidar %s: profile %s, %d rings %g..%g deg, %d columns at %g Hz, "
                              "%g m, no drop-off", rig.name, prof["name"], prof["channels"],
                              prof["lower_fov"], prof["upper_fov"], prof["columns"],
