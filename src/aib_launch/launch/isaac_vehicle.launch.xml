@@ -7,7 +7,7 @@
     play_launch launch aib_launch isaac_vehicle.launch.xml ego:=<ego.yaml> \
         world:=<map>/isaac/world.yaml map_pose:=x,y,z,yaw render:=window
 
-  Environment: ISAAC_ROOT (Isaac Sim 6.1), DISPLAY for render:=window, ISAAC_KIT_ARGS
+  Environment: ISAAC_ROOT (Isaac Sim 6.2), DISPLAY for render:=window, ISAAC_KIT_ARGS
   (e.g. the GPU), RMW_IMPLEMENTATION and CYCLONEDDS_URI as Autoware's.
 -->
 <launch>

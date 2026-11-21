@@ -11,7 +11,7 @@
 # it, so its paths are dropped first, after the aib package is found. The launch's --ros-args
 # mean nothing to it and are dropped too; the ROS domain is the ego config's.
 #
-# Environment: ISAAC_ROOT (Isaac Sim 6.1's install), DISPLAY (render auto/window),
+# Environment: ISAAC_ROOT (Isaac Sim 6.2's install), DISPLAY (render auto/window),
 # ISAAC_HEADLESS=1 (render auto: headless), ISAAC_KIT_ARGS (extra Kit settings, e.g. the GPU),
 # RMW_IMPLEMENTATION and CYCLONEDDS_URI (passed through: Autoware's DDS).
 set -e
@@ -45,7 +45,7 @@ case "$render" in
     *) echo "aib_isaac_vehicle: render '$render' is not auto, window or headless" >&2; exit 2 ;;
 esac
 [ -n "$display" ] && args+=(--display "$display")
-[ -n "${ISAAC_ROOT:-}" ] || { echo "aib_isaac_vehicle: ISAAC_ROOT is not set (Isaac Sim 6.1's install)" >&2; exit 2; }
+[ -n "${ISAAC_ROOT:-}" ] || { echo "aib_isaac_vehicle: ISAAC_ROOT is not set (Isaac Sim 6.2's install)" >&2; exit 2; }
 
 # The system ROS 2 environment out, Isaac's in.
 unset PYTHONPATH PYTHONHOME LD_LIBRARY_PATH AMENT_PREFIX_PATH CMAKE_PREFIX_PATH \

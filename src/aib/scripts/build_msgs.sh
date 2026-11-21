@@ -14,7 +14,7 @@
 # another workspace names its own colcon install, e.g. the vesc vehicle interface's
 # (scensim roadmap 091): AUTOWARE_PREFIX=<ws>/install/vesc_msgs build_msgs.sh vesc_msgs
 set -euo pipefail
-I=${ISAAC_ROOT:?ISAAC_ROOT is not set: it names Isaac Sim 6.1\'s pip install; set it (scensim: isaac.root in ~/.config/scensim/host.yaml)}
+I=${ISAAC_ROOT:?ISAAC_ROOT is not set: it names Isaac Sim 6.2\'s pip install; set it (scensim: isaac.root in ~/.config/scensim/host.yaml)}
 PREFIX=${AUTOWARE_PREFIX:-/opt/autoware/1.5.0}
 OUT=$I/msgs
 PKGS=("$@")

@@ -318,7 +318,9 @@ def main(argv=None):
 
     from isaacsim import SimulationApp
 
-    app = SimulationApp({"headless": True, "extra_args": ["--/crashreporter/url="]})  # no crash uploads
+    # no crash uploads; the host's Kit settings (ISAAC_KIT_ARGS), as the runner takes them
+    app = SimulationApp({"headless": True, "extra_args": ["--/crashreporter/url="]
+                         + os.environ.get("ISAAC_KIT_ARGS", "").split()})
     import omni.physx
     import omni.usd
     from isaacsim.core.api import World

@@ -5,7 +5,7 @@ project := justfile_directory()
 # Where Autoware's own setup.bash lives (the NEWSLabNTU 1.5.0 Debian installs under
 # /opt/autoware/1.5.0). Override with AUTOWARE_SETUP when yours is elsewhere.
 autoware_setup := env_var_or_default('AUTOWARE_SETUP', '/opt/autoware/1.5.0/setup.bash')
-# Isaac Sim 6.1's pip install (its venv, its bundled ROS 2 Humble). Environment, not a setting.
+# Isaac Sim 6.2's pip install (its venv, its bundled ROS 2 Humble). Environment, not a setting.
 isaac_root := env_var_or_default('ISAAC_ROOT', '')  # no default (csb 077 G75): set ISAAC_ROOT
 
 # List available recipes
