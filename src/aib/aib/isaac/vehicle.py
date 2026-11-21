@@ -383,7 +383,6 @@ class Vehicle:
     def apply(self, cmd: Command, dt, state: State):
         """One physics step's actuation: the vehicle interface's `cmd` as the by-wire request,
         the car's sensors as the last step left them, through the onboard computers."""
-        p = self.p
         if isinstance(cmd, Command):  # Autoware's: the by-wire request
             request = Request(cmd.acceleration, cmd.velocity, cmd.tire_angle, cmd.gear)
             velocity, gear = cmd.velocity, cmd.gear
@@ -393,7 +392,17 @@ class Vehicle:
             gear = GEAR_REVERSE if velocity < 0 else GEAR_DRIVE
         else:  # VescCommand: what moves the car is the component's alone (no release)
             request, velocity, gear = cmd, 0.0, GEAR_DRIVE
-        self.torques = act = components.checked(self.ecu.step(request, self.sensors(state), dt))
+        act = components.checked(self.ecu.step(request, self.sensors(state), dt))
+        self.actuate(act, dt, state, velocity, gear)
+
+    def actuate(self, act, dt, state: State, velocity=0.0, gear=GEAR_DRIVE):
+        """One physics step's actuation from `act` (an Actuation: four drive and brake torques
+        and the tire angle) computed outside this vehicle: what `apply` does after its onboard
+        computers, for a host that steps the control component itself, batched over many cars
+        (scensim roadmap 092 K2). `velocity` and `gear` are the request's, for the
+        sticky-tire release (`release_sticky`); a VESC's are 0 and drive."""
+        p = self.p
+        self.torques = act
         self.t += dt
         self.tire_angle = act.tire_angle
         if p.ackermann:
