@@ -81,6 +81,10 @@ class Ego:
         self.ros.now = self.now  # the commands that arrive now arrive at the frame's start
         self.ros.take_commands()
 
+    def taken_command(self):
+        """The command this frame runs (EgoRos.taken_command), or None."""
+        return self.ros.taken_command()
+
     def before_substep(self, dt):
         self.vehicle.apply(self.ros.command(self.now), dt, self.state)
         self.now += dt

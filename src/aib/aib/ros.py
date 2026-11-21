@@ -131,12 +131,6 @@ class EgoRos:
                     self.sensor_publisher(s)
         self.reset()
 
-        def on_control(msg):
-            self.cmd.acceleration = float(msg.longitudinal.acceleration)
-            self.cmd.velocity = float(msg.longitudinal.velocity)
-            self.cmd.tire_angle = float(msg.lateral.steering_tire_angle)
-            self.cmd.received = True
-
         def on_gear(msg):
             gear = gear_from_command(msg.command)
             if gear is not None:
@@ -155,7 +149,7 @@ class EgoRos:
             res.success = req.mode == 1  # AUTONOMOUS, as acb (manual has no driver here)
             return res
 
-        n.create_subscription(Control, control_topic, on_control, reliable)
+        n.create_subscription(Control, control_topic, self._on_control, reliable)
         n.create_subscription(GearCommand, "/control/command/gear_cmd", on_gear, reliable)
         n.create_subscription(TurnIndicatorsCommand, "/control/command/turn_indicators_cmd", on_turn, reliable)
         n.create_subscription(HazardLightsCommand, "/control/command/hazard_lights_cmd", on_hazard, reliable)
@@ -298,6 +292,9 @@ class EgoRos:
     def reset(self):
         """A new ego starts from no command: standing, in drive."""
         self.cmd = Command()
+        self.cmd_stamp_ns = 0   # the header stamp of the Control the car runs (0: none yet)
+        self.cmd_arrived = 0    # Controls taken at the last frame's start, the run one included
+        self._arrivals = 0
         if self.profile != "autoware":
             self.input.reset()
             if self.profile == "ackermann":
@@ -373,8 +370,32 @@ class EgoRos:
         `lockstep`, first wait for the localizer (`wait_localized`); with several egos the
         later calls find it done."""
         self.wait_localized()
+        self._arrivals = 0
         for _ in range(MAX_CALLBACKS_PER_FRAME):
             self.executor.spin_once(timeout_sec=0)
+        self.cmd_arrived = self._arrivals
+
+    def _on_control(self, msg):
+        """Autoware's Control: the latest wins (a car's vehicle interface runs the newest)."""
+        self.cmd_stamp_ns = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
+        self._arrivals += 1
+        self.cmd.acceleration = float(msg.longitudinal.acceleration)
+        self.cmd.velocity = float(msg.longitudinal.velocity)
+        self.cmd.tire_angle = float(msg.lateral.steering_tire_angle)
+        self.cmd.received = True
+
+    def taken_command(self):
+        """The Control the car runs this frame, for the world's truth (scensim roadmap 092
+        K2.4): its header stamp (ns), its values, the gear, and how many Controls arrived at
+        this frame's start. The latest wins, as on a car's vehicle interface: `arrived` above 1
+        means the others were superseded unrun, 0 that the car runs an older one again. None
+        for another profile, or before the first Control."""
+        if self.profile != "autoware" or not self.cmd.received:
+            return None
+        c = self.cmd
+        return {"stamp_ns": int(self.cmd_stamp_ns), "acceleration": c.acceleration,
+                "velocity": c.velocity, "tire_angle": c.tire_angle, "gear": int(c.gear),
+                "arrived": int(self.cmd_arrived)}
 
     def command(self, now):
         """What the vehicle takes at simulation time `now` (s): Autoware's `Command`, or the
