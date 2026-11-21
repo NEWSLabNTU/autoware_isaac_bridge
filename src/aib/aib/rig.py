@@ -62,6 +62,7 @@ class Rig:
     assumptions: list = field(default_factory=list)
     spec_hash: str = ""  # the sim_vehicle_spec spec this rig was generated from
     path: str = ""
+    spec_file: str = ""  # that spec's file (spec_path): a component's relative files are its
     spec: dict = field(default_factory=dict)  # that spec's document (the component's car)
     # a run's control component in place of the spec's (scensim roadmap 091):
     # {entry_point, params, truth: {<declared input>: {latency_s, noise_std}}, paths: [<dir>]}
@@ -77,8 +78,12 @@ class Rig:
         for path in self.component.get("paths") or ():  # where its package is (scensim 091 W3)
             if path not in sys.path:
                 sys.path.append(str(path))
+        # files a component's params name (the fmu component's unit) are relative to the spec's
+        # directory (scensim 091 W4)
+        base = str(Path(self.spec_file).parent) if self.spec_file else None
         if self.component or model == "component":
-            return components.for_spec(self.spec, seed=seed, component=self.component or None)
+            return components.for_spec(self.spec, seed=seed, component=self.component or None,
+                                       base=base)
         return components.EcuComponent.from_calibration(self.ecu)
 
     @classmethod
@@ -134,7 +139,8 @@ class Rig:
                    catalogue_model=body.get("catalogue_model", ""),
                    ground_clearance=float(body.get("ground_clearance") or 0.0),
                    sensors=sensors, assumptions=list(doc.get("assumptions") or []),
-                   spec_hash=spec_hash, path=str(path))
+                   spec_hash=spec_hash, path=str(path),
+                   spec_file=str(spec_path(path, doc["spec"])) if doc.get("spec") else "")
 
     def of_type(self, kind, enabled_only=True):
         return [s for s in self.sensors.values()
