@@ -61,6 +61,9 @@ class Rig:
     sensors: dict = field(default_factory=dict)  # name -> SensorRig
     assumptions: list = field(default_factory=list)
     spec_hash: str = ""  # the sim_vehicle_spec spec this rig was generated from
+    # what drives the car on Isaac (sim_vehicle_spec's isaac_physics_hash of the body it runs):
+    # a reference measured on this rig names it, so a comparison across two says so
+    isaac_physics_hash: str = ""
     path: str = ""
     spec_file: str = ""  # that spec's file (spec_path): a component's relative files are its
     spec: dict = field(default_factory=dict)  # that spec's document (the component's car)
@@ -140,6 +143,7 @@ class Rig:
                    ground_clearance=float(body.get("ground_clearance") or 0.0),
                    sensors=sensors, assumptions=list(doc.get("assumptions") or []),
                    spec_hash=spec_hash, path=str(path),
+                   isaac_physics_hash=str(doc.get("isaac_physics_hash") or ""),
                    spec_file=str(spec_path(path, doc["spec"])) if doc.get("spec") else "")
 
     def of_type(self, kind, enabled_only=True):

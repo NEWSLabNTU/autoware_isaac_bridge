@@ -53,6 +53,9 @@ class CheckTest(unittest.TestCase):
         self.assertIn("do not edit", head)
         rig = Rig.load(RIG)
         self.assertEqual(rig.spec_hash, gen.specmod.spec_hash(gen.specmod.load(SPEC)))
+        # what drives it on Isaac, for the references (scensim issue 100)
+        self.assertEqual(rig.isaac_physics_hash,
+                         gen.specmod.isaac_physics_hash(gen.isaac_body(gen.specmod.load(SPEC))))
         self.assertIn(rig.spec_hash, head)
         # the skid plate's height, only where the spec gives one
         self.assertEqual(rig.ground_clearance, 0.138)

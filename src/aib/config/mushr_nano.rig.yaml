@@ -6,6 +6,7 @@ name: mushr_nano
 description: WheeledLab's MuSHR nano v2 (2WD, the drift task's car), roadmap 094 P2
 assumptions: []
 spec_hash: cb73d8e54726b95e9ad77f48404da29cdbd0b488b1368ddd994949543a747338
+isaac_physics_hash: 7be68092c22396c3e4fc60e317a4de8fb84dbed0e88ea0323937c51f07e09915
 body:
   catalogue_model: ''
   box_center: [0.14345, 0.0, 0.116]

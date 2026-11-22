@@ -348,7 +348,12 @@ def main(argv=None):
                   rig.box_dims, pose, truth_settings=rig.component.get("truth"))
     log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
              SUB, dt)
+    # the rig's fingerprints: what the measurements are of. An override (the ego config's or
+    # --set) changes the car the spec describes, so a run with one says the hash is not the car's
     summary = {"powertrain": rig.ecu.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},
+               "rig": rig.name, "spec_hash": rig.spec_hash,
+               "isaac_physics_hash": rig.isaac_physics_hash,
+               "isaac_physics_hash_is_the_cars": not overrides,
                "tests": {}}
     only = [t for t in args.only.split(",") if t]
     try:

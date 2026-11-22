@@ -135,6 +135,9 @@ def rig(spec, header, spec_rel):
         "description": spec.doc.get("description", ""),
         "assumptions": specmod.assumptions(spec),
         "spec_hash": specmod.spec_hash(spec),
+        # what drives the car on Isaac (physics_hash plus the isaac section): the Isaac
+        # references key their results by it (scensim issue 100)
+        "isaac_physics_hash": specmod.isaac_physics_hash(spec),
         "body": {"catalogue_model": spec.section("body").get("catalogue_model", ""),
                  "box_center": list(center), "box_dims": list(dims),
                  **({"ground_clearance": gc} if gc else {})},

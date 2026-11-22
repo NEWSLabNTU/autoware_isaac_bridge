@@ -10,6 +10,7 @@ assumptions: [bodies.carla-0.9.16.carla.physics.body_com, bodies.carla-0.9.16.ca
   powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control, resistance.frontal_area,
   resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip, wheels.mass]
 spec_hash: dffb1d3df1f4ae564235a87c84c1a5a4b402f4d41d265186976561b96d31273c
+isaac_physics_hash: 0b274e95dc936c775589d6af0ff0eaaf4793066d4d38574fa9ec4de023e0fe15
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.416, 0.0, 0.744]
