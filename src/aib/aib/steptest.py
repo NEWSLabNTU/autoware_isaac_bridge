@@ -17,6 +17,7 @@ CSV of every frame goes to DIR, and a summary of the measurements to DIR/summary
 - `launch`:    full request from standstill: 0-100 km/h and 0-60 mph times
 - `brake_100`: 100 km/h, then -12 m/s^2 (past the tires): the stopping distance from 100
 - `regen_60`:  60 km/h, then -1.5 m/s^2 (all regen) and -4 m/s^2 (regen + friction)
+- `regen_30`:  the same from 30 km/h, which a car on low grip reaches within the test
 - `coast`:     100 km/h, then neutral: the road load's deceleration against the model's
 - `steps`:     at 10 m/s, +1.5 m/s^2 then -3 m/s^2 steps: the response's dead time and lag
 - `accel_brake`, `hard_brake`, `limit_brake`: scensim's step-response sequences (roadmap 043)
@@ -75,24 +76,33 @@ def brake_100(t, v, memo):
     return (-12.0, 0.0) if v > 0.05 else (0.0, 0.0)
 
 
-def regen_60(t, v, memo):
-    if t < 1.0:
-        return 0.0, 0.0
-    if "at" not in memo:
-        if v >= 60 * KMH:
-            memo["at"] = t
-        else:
-            return 3.0, 60 * KMH
-    dt = t - memo["at"]
-    if dt < 2.0:
-        return speed_hold(60 * KMH, v), 60 * KMH
-    if dt < 4.0:
-        return -1.5, 0.0
-    if dt < 6.0:
-        return speed_hold(60 * KMH, v, limit=2.5), 60 * KMH
-    if dt < 8.0:
-        return -4.0, 0.0
-    return speed_hold(0.0, v, limit=2.0), 0.0
+def _regen(kmh):
+    """Up to `kmh`, held 2 s, then -1.5 m/s^2 (regen alone) 2 s, back to `kmh`, then -4 m/s^2
+    (regen and friction) 2 s."""
+    def script(t, v, memo):
+        if t < 1.0:
+            return 0.0, 0.0
+        if "at" not in memo:
+            if v >= kmh * KMH:
+                memo["at"] = t
+            else:
+                return 3.0, kmh * KMH
+        dt = t - memo["at"]
+        if dt < 2.0:
+            return speed_hold(kmh * KMH, v), kmh * KMH
+        if dt < 4.0:
+            return -1.5, 0.0
+        if dt < 6.0:
+            return speed_hold(kmh * KMH, v, limit=2.5), kmh * KMH
+        if dt < 8.0:
+            return -4.0, 0.0
+        return speed_hold(0.0, v, limit=2.0), 0.0
+    return script
+
+
+regen_60 = _regen(60)
+# On low grip the car takes too long to reach 60 km/h for regen_60's 24 s (scensim issue 106)
+regen_30 = _regen(30)
 
 
 def steps(t, v, memo):
@@ -158,11 +168,15 @@ CAMBER = {t: math.degrees(math.atan(0.03))
 STEER = {"start_turn": "max", "start_turn_camber": "max"}
 # the tests read at every physics step, not only every frame
 SUBSTEP_LOG = {"chatter_camber"}
+# The onboard computer's regen and ABS state at every step it takes (one per physics step), to
+# `<test>_steps.csv`: which acts first is a question of steps, not of 0.05 s rows (scensim 106)
+STEP_LOG = {"regen_60", "regen_30"}
 
 TESTS = {
     "launch": (14.0, launch),
     "brake_100": (24.0, brake_100),
     "regen_60": (24.0, regen_60),
+    "regen_30": (24.0, regen_30),
     "steps": (20.0, steps),
     "coast": (30.0, coast),
     "accel_brake": (11.0, accel_brake),
@@ -231,7 +245,7 @@ def measure(test, rows):
                 1 for r in rows[i0:stop] if r["v"] > 2.0 and min(
                     abs(r["omega_fl"]), abs(r["omega_fr"]), abs(r["omega_rl"]), abs(r["omega_rr"])) < 0.5)
             out["abs_min_factor"] = round(min(r["abs_min"] for r in rows[i0:stop]), 3)
-    elif test == "regen_60":
+    elif test in ("regen_60", "regen_30"):
         for req, label in ((-1.5, "regen_1_5"), (-4.0, "blend_4")):
             seg = [r for r in rows if abs(r["cmd_a"] - req) < 1e-6]
             if not seg:
@@ -438,7 +452,7 @@ def main(argv=None):
             x0 = state.position[0]
             steer = STEER.get(test, 0.0)
             cmd.tire_angle = params.max_steer_angle if steer == "max" else float(steer)
-            sub_rows, ts = [], 0.0
+            sub_rows, step_rows, ts = [], [], 0.0
             rows, memo, t = [], {}, 0.0
             v_prev = state.velocity[0]
             while t < length - 1e-9:
@@ -451,6 +465,16 @@ def main(argv=None):
                     world.step(render=False)
                     veh.sample(physx, dt, state)
                     ts += dt
+                    if test in STEP_LOG:
+                        d = getattr(veh.ecu, "debug", {})
+                        step_rows.append({"t": round(ts, 5), "v": state.velocity[0],
+                                          "cmd_a": cmd.acceleration,
+                                          "regen_force": d.get("regen_force", 0.0),
+                                          "regen_factor": d.get("regen_factor", 1.0),
+                                          "regen_cap": d.get("regen_cap"),
+                                          "axle_mu": d.get("axle_mu"),
+                                          "abs_min": min(d.get("abs", (1.0,))),
+                                          "brake_r": veh.torques.brake[2]})
                     if test in SUBSTEP_LOG:
                         wsub = veh.wheel_states or []
                         sub_rows.append({"t": round(ts, 5), "vy": state.velocity[1],
@@ -478,6 +502,11 @@ def main(argv=None):
                     row[f"omega_{name}"] = w.rotation_speed if w else 0.0
                 rows.append(row)
                 v_prev = vx
+            if step_rows:
+                with open(out / f"{test}_steps.csv", "w", newline="") as f:
+                    wr = csv.DictWriter(f, fieldnames=list(step_rows[0]))
+                    wr.writeheader()
+                    wr.writerows(step_rows)
             with open(out / f"{test}.csv", "w", newline="") as f:
                 wr = csv.DictWriter(f, fieldnames=list(rows[0]))
                 wr.writeheader()
