@@ -77,13 +77,14 @@ class VehicleParams:
     # PhysX vehicle integration
     physx_substeps: int = 8
     substep_threshold_speed: float = 5.0
-    min_active_slip_denominator: float = 4.0  # m/s
-    min_passive_slip_denominator: float = 4.0
-    min_lateral_slip_denominator: float = 1.0
+    # the Model 3's (scensim issue 100: 4, 4 and 1 until 2026-11-22)
+    min_active_slip_denominator: float = 1.0  # m/s
+    min_passive_slip_denominator: float = 1.0
+    min_lateral_slip_denominator: float = 0.1
     sticky_tire_threshold_speed: float = 0.2
     sticky_tire_threshold_time: float = 1.0
     longitudinal_sticky_tire_damping: float = 200.0
-    lateral_sticky_tire_damping: float = 200.0
+    lateral_sticky_tire_damping: float = 3200.0  # the Model 3's (scensim issue 102: 200 before)
     # PhysX leaves its sticky-tyre state only on drive torque: a car in gear asked to move,
     # with no drive and its brakes released (below the onboard computers' brake_floor), gets
     # this much on each driven wheel, so it can roll as a real one does (issue 070: a downhill

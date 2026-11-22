@@ -8,7 +8,7 @@ description: 1966 Mustang drift build (light, 50:50, 330 kW rear motor, locked r
 assumptions: [brakes, carla.physics, geometry.max_steer_angle, inertia.com_front_fraction, inertia.com_height,
   inertia.inertia_box, inertia.mass, powertrain, resistance, suspension, tires.friction_vs_slip]
 spec_hash: 65f1ba86a28fd88003747a5fb8a5ab8df0ab11c55e778a4b7ea1f9ab553c40ae
-isaac_physics_hash: 7f4ce0173177fde15fcf01f83467bed8d568b44d43061a8c3d0640317f0ccd1a
+isaac_physics_hash: 0fe7bb243a18062da069f41fd6b7a7ab042ce9c1a10ef7941e7e1d943f2a15c1
 body:
   catalogue_model: vehicle.ford.mustang
   box_center: [1.356, 0.0, 0.6505]

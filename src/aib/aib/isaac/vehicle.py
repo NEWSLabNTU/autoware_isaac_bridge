@@ -411,7 +411,9 @@ class Vehicle:
             left = right = self.tire_angle
         angles = (left, right, 0.0, 0.0)  # WHEELS' order
         drives, brakes = release_sticky(act.drive, act.brake, velocity, gear,
-                                        self.brake_floor, p.release_torque, self.driven)
+                                        self.brake_floor, p.release_torque, self.driven,
+                                        speed=state.velocity[0],
+                                        standing=p.sticky_tire_threshold_speed)
         for (_, d, b, s), drive, brake, angle in zip(self.wheels, drives, brakes, angles):
             d.Set(drive)
             b.Set(brake)

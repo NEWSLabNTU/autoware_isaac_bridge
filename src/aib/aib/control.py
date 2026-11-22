@@ -24,14 +24,22 @@ def driven_wheels(powertrain: str, drive_axle: str) -> tuple:
     return (front, front, not front, not front)
 
 
-def release_sticky(drive, brake, velocity, gear, brake_floor, torque, driven):
+def release_sticky(drive, brake, velocity, gear, brake_floor, torque, driven, *, speed,
+                   standing):
     """The torques PhysX gets: `drive` and `brake` as the onboard computers put them, unless
-    the car is in drive or reverse, asked to move (target `velocity` past MOVE_VELOCITY), with
-    no drive torque and every brake below `brake_floor` (released). Then `torque` N m on each
-    `driven` wheel, along the target's direction, and no brake: PhysX's sticky tyres hold a
-    standing car until a wheel gets drive torque, where a real car with its brakes released
-    rolls (issue 070). A target of 0 (stopping, parked) is left to the hold brake."""
-    if (torque <= 0 or gear not in (GEAR_DRIVE, GEAR_REVERSE) or abs(velocity) <= MOVE_VELOCITY
+    the car stands (its own `speed` within `standing`, PhysX's sticky-tyre threshold speed), in
+    drive or reverse, asked to move (target `velocity` past MOVE_VELOCITY), with no drive torque
+    and every brake below `brake_floor` (released). Then `torque` N m on each `driven` wheel,
+    along the target's direction, and no brake: PhysX's sticky tyres hold a standing car until
+    a wheel gets drive torque, where a real car with its brakes released rolls (issue 070). A
+    target of 0 (stopping, parked) is left to the hold brake.
+
+    Only a standing car: the sticky state exists only below the threshold speed. A moving car
+    whose drive torque is 0 because traction control cut it got the release torque on its
+    driven wheels too, which kept them spinning past the road. TC read that spin as slip and
+    held the torque at 0, so the car never drove again (scensim issue 103)."""
+    if (torque <= 0 or abs(speed) > standing or gear not in (GEAR_DRIVE, GEAR_REVERSE)
+            or abs(velocity) <= MOVE_VELOCITY
             or any(d != 0.0 for d in drive) or any(b >= brake_floor for b in brake)):
         return tuple(drive), tuple(brake)
     sign = -1.0 if gear == GEAR_REVERSE else 1.0

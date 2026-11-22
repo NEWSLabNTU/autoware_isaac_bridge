@@ -103,11 +103,11 @@ class ReleaseStickyTest(unittest.TestCase):
     def test_released_brakes_and_a_target_get_the_release_torque(self):
         # Autoware's downhill start: -0.028 m/s^2 is ~4.7 N m a wheel, below the floor
         drive, brake = release_sticky(self.ZERO, (4.7,) * 4, 0.25, GEAR_DRIVE, self.FLOOR, 1.0,
-                                      self.REAR)
+                                      self.REAR, speed=0.0, standing=0.2)
         self.assertEqual(drive, (0.0, 0.0, 1.0, 1.0))
         self.assertEqual(brake, self.ZERO)
         drive, _ = release_sticky(self.ZERO, self.ZERO, -0.5, GEAR_REVERSE, self.FLOOR, 1.0,
-                                  self.REAR)
+                                  self.REAR, speed=0.0, standing=0.2)
         self.assertEqual(drive, (0.0, 0.0, -1.0, -1.0))
 
     def test_anything_else_passes_unchanged(self):
@@ -120,9 +120,23 @@ class ReleaseStickyTest(unittest.TestCase):
             (self.ZERO, self.ZERO, 0.25, GEAR_PARK),
         ]
         for drive, brake, v, gear in cases:
-            self.assertEqual(release_sticky(drive, brake, v, gear, self.FLOOR, 1.0, self.REAR),
+            self.assertEqual(release_sticky(drive, brake, v, gear, self.FLOOR, 1.0, self.REAR,
+                                            speed=0.0, standing=0.2),
                              (drive, brake), (drive, brake, v, gear))
         # release_torque 0 turns it off
         self.assertEqual(release_sticky(self.ZERO, self.ZERO, 0.25, GEAR_DRIVE, self.FLOOR, 0.0,
-                                        self.REAR), (self.ZERO, self.ZERO))
+                                        self.REAR, speed=0.0, standing=0.2),
+                         (self.ZERO, self.ZERO))
+
+    def test_a_moving_car_gets_no_release_torque(self):
+        """Issue 103: traction control cut the drive to 0 at 0.9 m/s; the release torque then
+        spun the driven wheels, TC read that as slip and held the drive at 0 for good."""
+        for speed in (0.21, 0.87, -0.5, 10.0):
+            self.assertEqual(release_sticky(self.ZERO, self.ZERO, 0.25, GEAR_DRIVE, self.FLOOR, 1.0,
+                                            self.REAR, speed=speed, standing=0.2),
+                             (self.ZERO, self.ZERO), speed)
+        # standing, it still releases
+        drive, _ = release_sticky(self.ZERO, self.ZERO, 0.25, GEAR_DRIVE, self.FLOOR, 1.0,
+                                  self.REAR, speed=0.15, standing=0.2)
+        self.assertEqual(drive, (0.0, 0.0, 1.0, 1.0))
 

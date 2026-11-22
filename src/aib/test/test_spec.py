@@ -39,7 +39,7 @@ class ShippedSpecTest(unittest.TestCase):
         self.assertEqual(p.tire_friction, 1.0)
         self.assertEqual((p.suspension_frequency, p.suspension_damping_ratio), (1.6, 0.45))
         self.assertEqual(p.physx_substeps, 8)
-        self.assertEqual(p.min_active_slip_denominator, 4.0)
+        self.assertEqual(p.min_active_slip_denominator, 1.0)   # scensim issue 100: 4.0 before
         self.assertEqual(p.friction_vs_slip, ((0.0, 1.0), (0.1, 1.0), (1.0, 0.8)))
         self.assertEqual((p.drag_coefficient, p.frontal_area), (0.23, 2.2))
         c = Calibration.from_spec(self.spec.doc)
@@ -119,3 +119,38 @@ class DerivedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OtherCarsUnchangedTest(unittest.TestCase):
+    """scensim issue 100 moved aib's PhysX defaults and sim_vehicle_ecu's ABS defaults to the
+    Model 3's retune. The other shipped cars write the values they had in their own specs, so
+    their rigs and onboard computers are as before: these are the values of aib bf35c0b and
+    sim_vehicle_ecu 3b3355a, measured on both at the time."""
+
+    ECU = {"drift_mustang": {"abs_enabled": False, "abs_slip_release": 0.25,
+                             "abs_slip_reapply": 0.15, "tc_enabled": False,
+                             "est_slip_offset": 4.0},
+           "mushr_nano": {"abs_enabled": True, "abs_slip_release": 0.25,
+                          "abs_slip_reapply": 0.15, "abs_release_rate": 8.0,
+                          "abs_apply_rate": 4.0, "abs_min_speed": 1.5, "tc_enabled": True,
+                          "tc_slip_limit": 0.25, "tc_slip_reapply": 0.15,
+                          "est_slip_offset": 4.0}}
+    PHYSX = {"drift_mustang": (4.0, 20.0), "mushr_nano": (4.0, 200.0)}
+
+    def spec(self, name):
+        sp = specmod.load(SPEC.parent / f"{name}.yaml")
+        bodies = specmod.bodies(sp)
+        return specmod.effective(sp, bodies[0]) if bodies else sp
+
+    def test_their_onboard_computers(self):
+        for name, want in self.ECU.items():
+            c = Calibration.from_spec(self.spec(name).doc)
+            for k, v in want.items():
+                self.assertEqual(getattr(c, k), v, (name, k))
+
+    def test_their_physx_vehicles(self):
+        for name, (d, lateral) in self.PHYSX.items():
+            p = vehicle_params(self.spec(name))
+            self.assertEqual(p.min_active_slip_denominator, d, name)
+            self.assertEqual(p.min_passive_slip_denominator, d, name)
+            self.assertEqual(p.lateral_sticky_tire_damping, lateral, name)

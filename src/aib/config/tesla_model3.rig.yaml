@@ -1,16 +1,16 @@
-# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash dffb1d3df1f4ae564235a87c84c1a5a4b402f4d41d265186976561b96d31273c) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 89cc738fd55929edd0e260121a80bfdde209563d8d7a97648505f557d9685f1e) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/tesla_model3.yaml
 name: tesla_model3
 description: Tesla Model 3 RWD; each simulator runs it on its own body (bodies)
 assumptions: [bodies.carla-0.9.16.carla.physics.body_com, bodies.carla-0.9.16.carla.physics.drag_area,
-  brakes.abs, brakes.dead_time, brakes.time_constant, inertia.com_front_fraction, inertia.com_height,
+  brakes.abs, brakes.dead_time, brakes.estimator, brakes.time_constant, inertia.com_front_fraction, inertia.com_height,
   inertia.inertia_box, powertrain.motor_max_rpm, powertrain.motor_time_constant, powertrain.regen_fade_speeds,
   powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control, resistance.frontal_area,
   resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip, wheels.mass]
-spec_hash: dffb1d3df1f4ae564235a87c84c1a5a4b402f4d41d265186976561b96d31273c
-isaac_physics_hash: 0b274e95dc936c775589d6af0ff0eaaf4793066d4d38574fa9ec4de023e0fe15
+spec_hash: 89cc738fd55929edd0e260121a80bfdde209563d8d7a97648505f557d9685f1e
+isaac_physics_hash: 4b1b86fe65f0901483db05e78226adb2b96e740544c5c66ac365323f8b6425e2
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.416, 0.0, 0.744]
@@ -51,13 +51,13 @@ vehicle:
   bump_damping: 0.5
   physx_substeps: 8
   substep_threshold_speed: 5.0
-  min_active_slip_denominator: 4.0
-  min_passive_slip_denominator: 4.0
-  min_lateral_slip_denominator: 1.0
+  min_active_slip_denominator: 1.0
+  min_passive_slip_denominator: 1.0
+  min_lateral_slip_denominator: 0.1
   sticky_tire_threshold_speed: 0.2
   sticky_tire_threshold_time: 1.0
   longitudinal_sticky_tire_damping: 200.0
-  lateral_sticky_tire_damping: 200.0
+  lateral_sticky_tire_damping: 3200.0
   release_torque: 1.0
 sensors:
   top:
@@ -81,7 +81,7 @@ sensors:
           RailTrack: 15, Bridge: 25, Buildings: 40, Walls: 40, Fences: 45, GuardRail: 60, Poles: 50, TrafficLight: 50,
           TrafficSigns: 150, Vegetation: 45, Static: 40, Dynamic: 45, Other: 30, Sky: 0, Pedestrians: 50,
           Rider: 50, Car: 90, Truck: 90, Bus: 90, Train: 80, Motorcycle: 80, Bicycle: 60}
-      profile: {name: spec_dffb1d3df1f4_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
+      profile: {name: spec_89cc738fd559_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
         rate_hz: 20.0, range: 200.0}
   camera6:
     type: camera

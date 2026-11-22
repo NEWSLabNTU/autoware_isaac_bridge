@@ -24,6 +24,16 @@ CSV of every frame goes to DIR, and a summary of the measurements to DIR/summary
   gravity tilted, downhill ahead), under one constant request: Autoware's downhill start
   (-0.028 m/s^2 towards 0.25 m/s, which only the release torque lets roll; issue 070), the
   same on the flat (a creep), an uphill start, and a target of 0 (held)
+- `hold_camber`: 60 s held (a target of 0) across a 3 % road camber (the gravity tilted
+  sideways, the road falling to the car's right): the sideways creep a parked car must not
+  have (csb roadmap 059 N8: 0.9 m in 60 s at a lateral sticky damping of 20, 0.1 cm at 200;
+  scensim issue 100's constraint)
+- `start_turn`, `start_turn_camber`: from rest with the wheel at full lock (the spec's
+  max_steer_angle) under a parking creep (+0.6 m/s^2 towards 1 m/s), on the flat and across the
+  3 % camber: whether a stiff sideways hold fights a turn out of a parking spot (issue 102)
+- `chatter_camber`: 60 s held across the camber, the body's sideways velocity and the wheels'
+  spin read at every physics step (`<test>_substeps.csv`): their RMS and spectrum, since a stiff
+  sticky damper can ring (issue 102)
 """
 import argparse
 import csv
@@ -141,6 +151,13 @@ def constant(accel, velocity):
 
 # the slope tests: degrees, downhill ahead (+x); the others run on the flat
 SLOPE = {"start_down": 3.1, "start_up": -3.1, "hold_down": 3.1}
+# sideways: degrees, the road falling to the car's right (-y); 3 % is atan(0.03)
+CAMBER = {t: math.degrees(math.atan(0.03))
+          for t in ("hold_camber", "start_turn_camber", "chatter_camber")}
+# the turning starts' tire angle: full lock (set from the rig's max_steer_angle at run time)
+STEER = {"start_turn": "max", "start_turn_camber": "max"}
+# the tests read at every physics step, not only every frame
+SUBSTEP_LOG = {"chatter_camber"}
 
 TESTS = {
     "launch": (14.0, launch),
@@ -156,6 +173,10 @@ TESTS = {
     "start_up": (10.0, constant(0.6, 0.25)),
     "hold_down": (10.0, constant(-1.0, 0.0)),
     "hold_flat": (10.0, constant(0.0, 0.0)),
+    "hold_camber": (60.0, constant(-1.0, 0.0)),
+    "start_turn": (12.0, constant(0.6, 1.0)),
+    "start_turn_camber": (12.0, constant(0.6, 1.0)),
+    "chatter_camber": (60.0, constant(-1.0, 0.0)),
 }
 
 
@@ -251,9 +272,50 @@ def measure(test, rows):
         out["v_5s"] = round(rows[at5]["v"], 4)
         out["v_end"] = round(rows[-1]["v"], 4)
         out["x_end"] = round(rows[-1]["x"], 4)
+    if test in ("start_turn", "start_turn_camber"):
+        # the start: when it first moved 0.1 m, where it is after the test, and the turn's radius
+        # over the last 4 s (speed over yaw rate) against the bicycle's L / tan(lock)
+        d = [math.hypot(r["x"], r["y"] - rows[0]["y"]) for r in rows]
+        moved = next((r["t"] for r, dd in zip(rows, d) if dd >= 0.1), None)
+        out["t_0p1m_s"] = moved
+        out["dist_end_m"] = round(d[-1], 4)
+        late = [r for r in rows if r["t"] >= rows[-1]["t"] - 4.0]
+        w = _mean([r["yaw_rate"] for r in late])
+        sp = _mean([math.hypot(r["v"], r["vy"]) for r in late])
+        out["v_end"] = round(sp, 4)
+        out["radius_m"] = round(sp / w, 3) if abs(w) > 1e-4 else None
+    if test in ("hold_camber", "chatter_camber"):
+        # the sideways creep after the settle: its distance over the test, and its rate over
+        # the last 30 s, where a steady creep shows
+        y0 = rows[0]["y"]
+        out["y_end_m"] = round(rows[-1]["y"] - y0, 5)
+        out["x_end_m"] = round(rows[-1]["x"], 5)
+        late = [r for r in rows if r["t"] >= rows[-1]["t"] - 30.0]
+        out["y_rate_cm_s"] = round(100 * (late[-1]["y"] - late[0]["y"])
+                                   / max(late[-1]["t"] - late[0]["t"], 1e-9), 5)
     if test in ("steps", "accel_brake", "hard_brake"):
         err = [abs(r["a"] - r["cmd_a"]) for r in rows if abs(r["cmd_a"]) > 0.2 and r["v"] > 1.0]
         out["mean_abs_accel_error"] = round(_mean(err), 3)
+    return out
+
+
+def chatter(sub_rows, dt):
+    """The held car's ringing, from every physics step after the first 5 s: the RMS of the body's
+    sideways velocity and of each wheel's spin about its mean, and the frequency and share of
+    the largest peak in the sideways velocity's spectrum."""
+    import numpy as np
+    keep = [r for r in sub_rows if r["t"] > 5.0]
+    vy = np.array([r["vy"] for r in keep])
+    out = {"vy_rms_mm_s": round(float(np.sqrt(np.mean((vy - vy.mean()) ** 2))) * 1000, 5)}
+    om = np.array([[r[f"omega_{n}"] for n in ("fl", "fr", "rl", "rr")] for r in keep])
+    out["omega_rms_rad_s"] = round(float(np.sqrt(np.mean((om - om.mean(0)) ** 2))), 6)
+    spec = np.abs(np.fft.rfft(vy - vy.mean())) ** 2
+    freq = np.fft.rfftfreq(len(vy), dt)
+    if len(spec) > 1 and spec[1:].sum() > 0:
+        k = 1 + int(np.argmax(spec[1:]))
+        out["vy_peak_hz"] = round(float(freq[k]), 3)
+        out["vy_peak_share"] = round(float(spec[k] / spec[1:].sum()), 4)
+    out["sample_hz"] = round(1 / dt, 2)
     return out
 
 
@@ -361,7 +423,9 @@ def main(argv=None):
             if only and test not in only:
                 continue
             th = math.radians(SLOPE.get(test, 0.0))
-            gravity.Set(Gf.Vec3f(math.sin(th), 0.0, -math.cos(th)))
+            ph = math.radians(CAMBER.get(test, 0.0))
+            gravity.Set(Gf.Vec3f(math.sin(th) * math.cos(ph), -math.sin(ph),
+                                 -math.cos(th) * math.cos(ph)))
             veh.teleport(pose, physx)
             state = State()
             cmd = Command(received=True, gear=GEAR_DRIVE)
@@ -372,6 +436,9 @@ def main(argv=None):
                     world.step(render=False)
                     veh.sample(physx, dt, state)
             x0 = state.position[0]
+            steer = STEER.get(test, 0.0)
+            cmd.tire_angle = params.max_steer_angle if steer == "max" else float(steer)
+            sub_rows, ts = [], 0.0
             rows, memo, t = [], {}, 0.0
             v_prev = state.velocity[0]
             while t < length - 1e-9:
@@ -383,6 +450,13 @@ def main(argv=None):
                     veh.apply(cmd, dt, state)
                     world.step(render=False)
                     veh.sample(physx, dt, state)
+                    ts += dt
+                    if test in SUBSTEP_LOG:
+                        wsub = veh.wheel_states or []
+                        sub_rows.append({"t": round(ts, 5), "vy": state.velocity[1],
+                                         "vx": state.velocity[0],
+                                         **{f"omega_{n}": (w.rotation_speed if w else 0.0)
+                                            for n, w in zip(("fl", "fr", "rl", "rr"), wsub)}})
                 t += FRAME
                 vx = state.velocity[0]
                 ws = veh.wheel_states or [None] * 4
@@ -397,7 +471,8 @@ def main(argv=None):
                        "regen_force": dbg.get("regen_force", 0.0),
                        "tc": dbg.get("tc", 1.0),
                        "abs_min": min(dbg.get("abs", (1.0,))),
-                       "pitch_z": state.position[2], "neutral": int(cmd.gear == GEAR_NEUTRAL)}
+                       "pitch_z": state.position[2], "neutral": int(cmd.gear == GEAR_NEUTRAL),
+                       "vy": state.velocity[1], "yaw_rate": state.angular_velocity[2]}
                 for name, w in zip(("fl", "fr", "rl", "rr"), ws):
                     row[f"slip_{name}"] = w.slip if w else 0.0
                     row[f"omega_{name}"] = w.rotation_speed if w else 0.0
@@ -407,7 +482,14 @@ def main(argv=None):
                 wr = csv.DictWriter(f, fieldnames=list(rows[0]))
                 wr.writeheader()
                 wr.writerows(rows)
+            if sub_rows:
+                with open(out / f"{test}_substeps.csv", "w", newline="") as f:
+                    wr = csv.DictWriter(f, fieldnames=list(sub_rows[0]))
+                    wr.writeheader()
+                    wr.writerows(sub_rows)
             m = measure(test, rows)
+            if sub_rows:
+                m.update(chatter(sub_rows, dt))
             summary["tests"][test] = m
             log.info("%s: %s", test, json.dumps(m))
     finally:
