@@ -1,12 +1,12 @@
-# Generated from sim_vehicle_spec/vehicles/mushr_nano.yaml (spec_hash 70fc756027264a2ea0ae4dcc41eeb5aa6df60a43917f25aeff6e42dbb813e26c) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/mushr_nano.yaml (spec_hash a17863c6e33dfa7ed9795842fda0e0d2d83f9e7f942f9645f61a58589294e32a) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/mushr_nano.yaml
 name: mushr_nano
 description: WheeledLab's MuSHR nano v2 (2WD, the drift task's car), roadmap 094 P2
 assumptions: []
-spec_hash: 70fc756027264a2ea0ae4dcc41eeb5aa6df60a43917f25aeff6e42dbb813e26c
-isaac_physics_hash: 12054a26d32bd54029d036016f44095f49a170c3504c9d3e06120464f4429e2a
+spec_hash: a17863c6e33dfa7ed9795842fda0e0d2d83f9e7f942f9645f61a58589294e32a
+isaac_physics_hash: fcfb08617cfe7c752156ca9b350618a6443fd6712d6c2227ffa227f1969cd302
 body:
   catalogue_model: ''
   box_center: [0.14345, 0.0, 0.116]
