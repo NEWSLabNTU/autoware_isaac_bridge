@@ -129,7 +129,8 @@ class OtherCarsUnchangedTest(unittest.TestCase):
 
     ECU = {"drift_mustang": {"abs_enabled": False, "abs_slip_release": 0.25,
                              "abs_slip_reapply": 0.15, "tc_enabled": False,
-                             "est_slip_offset": 4.0},
+                             "est_slip_offset": 4.0,
+                             "regen_slip_release": 0.25},   # issue 106 moved the default
            "mushr_nano": {"abs_enabled": True, "abs_slip_release": 0.25,
                           "abs_slip_reapply": 0.15, "abs_release_rate": 8.0,
                           "abs_apply_rate": 4.0, "abs_min_speed": 1.5, "tc_enabled": True,

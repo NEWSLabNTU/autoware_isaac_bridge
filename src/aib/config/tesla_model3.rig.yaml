@@ -1,4 +1,4 @@
-# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 89cc738fd55929edd0e260121a80bfdde209563d8d7a97648505f557d9685f1e) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/tesla_model3.yaml (spec_hash 4d2bbaff65967b5aeb6f9fd35e0fc9b8b6c575824ad57158c9f9b68db13a5d76) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/tesla_model3.yaml
@@ -7,10 +7,11 @@ description: Tesla Model 3 RWD; each simulator runs it on its own body (bodies)
 assumptions: [bodies.carla-0.9.16.carla.physics.body_com, bodies.carla-0.9.16.carla.physics.drag_area,
   brakes.abs, brakes.dead_time, brakes.estimator, brakes.time_constant, inertia.com_front_fraction, inertia.com_height,
   inertia.inertia_box, powertrain.motor_max_rpm, powertrain.motor_time_constant, powertrain.regen_fade_speeds,
-  powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.traction_control, resistance.frontal_area,
-  resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip, wheels.mass]
-spec_hash: 89cc738fd55929edd0e260121a80bfdde209563d8d7a97648505f557d9685f1e
-isaac_physics_hash: 4b1b86fe65f0901483db05e78226adb2b96e740544c5c66ac365323f8b6425e2
+  powertrain.regen_max_power, powertrain.regen_max_torque, powertrain.regen_slip_control, powertrain.traction_control,
+  resistance.frontal_area, resistance.rolling_coefficient, suspension, tires, tires.friction_vs_slip,
+  wheels.mass]
+spec_hash: 4d2bbaff65967b5aeb6f9fd35e0fc9b8b6c575824ad57158c9f9b68db13a5d76
+isaac_physics_hash: c3d9a973d034f96ede3e815fb32090a4c9b932c2a5f4bbc11ab4c2eb8ddcac0e
 body:
   catalogue_model: vehicle.tesla.model3
   box_center: [1.416, 0.0, 0.744]
@@ -81,7 +82,7 @@ sensors:
           RailTrack: 15, Bridge: 25, Buildings: 40, Walls: 40, Fences: 45, GuardRail: 60, Poles: 50, TrafficLight: 50,
           TrafficSigns: 150, Vegetation: 45, Static: 40, Dynamic: 45, Other: 30, Sky: 0, Pedestrians: 50,
           Rider: 50, Car: 90, Truck: 90, Bus: 90, Train: 80, Motorcycle: 80, Bicycle: 60}
-      profile: {name: spec_89cc738fd559_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
+      profile: {name: spec_4d2bbaff6596_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
         rate_hz: 20.0, range: 200.0}
   camera6:
     type: camera

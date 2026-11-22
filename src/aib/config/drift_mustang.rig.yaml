@@ -1,4 +1,4 @@
-# Generated from sim_vehicle_spec/vehicles/drift_mustang.yaml (spec_hash 65f1ba86a28fd88003747a5fb8a5ab8df0ab11c55e778a4b7ea1f9ab553c40ae) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# Generated from sim_vehicle_spec/vehicles/drift_mustang.yaml (spec_hash 07003bd3a4de860212e5b48770fed824450208867f8363644a81f5d54229736c) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
 # The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
 # Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
 spec: sim_vehicle_spec/vehicles/drift_mustang.yaml
@@ -7,8 +7,8 @@ description: 1966 Mustang drift build (light, 50:50, 330 kW rear motor, locked r
   no ABS/TC/ESC) on the CARLA vehicle.ford.mustang body
 assumptions: [brakes, carla.physics, geometry.max_steer_angle, inertia.com_front_fraction, inertia.com_height,
   inertia.inertia_box, inertia.mass, powertrain, resistance, suspension, tires.friction_vs_slip]
-spec_hash: 65f1ba86a28fd88003747a5fb8a5ab8df0ab11c55e778a4b7ea1f9ab553c40ae
-isaac_physics_hash: 0fe7bb243a18062da069f41fd6b7a7ab042ce9c1a10ef7941e7e1d943f2a15c1
+spec_hash: 07003bd3a4de860212e5b48770fed824450208867f8363644a81f5d54229736c
+isaac_physics_hash: 85f314abb61c0c761ce17af7579f500071c133c89197e95924eb1af45082add4
 body:
   catalogue_model: vehicle.ford.mustang
   box_center: [1.356, 0.0, 0.6505]
@@ -72,7 +72,7 @@ sensors:
     isaac:
       config: OS1
       variant: OS1_REV7_128ch20hz1024res
-      profile: {name: spec_65f1ba86a28f_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
+      profile: {name: spec_07003bd3a4de_top, channels: 128, upper_fov: 15.0, lower_fov: -25.0, columns: 1024,
         rate_hz: 20.0, range: 200.0}
   camera6:
     type: camera
