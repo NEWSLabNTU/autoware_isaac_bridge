@@ -1,0 +1,57 @@
+# Generated from sim_vehicle_spec/vehicles/mushr_nano.yaml (spec_hash cb73d8e54726b95e9ad77f48404da29cdbd0b488b1368ddd994949543a747338) by aib.gen (autoware_isaac_bridge `just generate`): do not edit; change the spec and regenerate.
+# The Isaac rig: what aib builds the PhysX vehicle and its sensors from (aib.rig).
+# Sensor transforms are base_link -> link, translation in m, quaternion w x y z.
+spec: sim_vehicle_spec/vehicles/mushr_nano.yaml
+name: mushr_nano
+description: WheeledLab's MuSHR nano v2 (2WD, the drift task's car), roadmap 094 P2
+assumptions: []
+spec_hash: cb73d8e54726b95e9ad77f48404da29cdbd0b488b1368ddd994949543a747338
+body:
+  catalogue_model: ''
+  box_center: [0.14345, 0.0, 0.116]
+  box_dims: [0.4399, 0.23, 0.232]
+  ground_clearance: 0.03
+vehicle:
+  model: ''
+  wheel_base: 0.2965
+  wheel_tread: 0.23
+  wheel_radius: 0.0525
+  wheel_width: 0.0405
+  max_steer_angle: 0.488
+  mass: 4.114
+  com: [0.15314225, 0.0, 0.1017]
+  inertia_box: [0.1016, 0.087, 0.1669]
+  wheel_mass: 0.111
+  wheel_damping_rate: 0.25
+  tire_friction: 1.0
+  lat_stiff_max_load: 2.0
+  lat_stiff_value: 17.0
+  long_stiff_value: 4612.5
+  friction_vs_slip:
+  - [0.0, 1.0]
+  - [0.1, 1.0]
+  - [1.0, 0.8]
+  rolling_coefficient: 0.0
+  drag_coefficient: 0.0
+  frontal_area: 0.0
+  air_density: 1.2
+  ackermann: false
+  suspension_frequency: 30.0
+  suspension_damping_ratio: 0.0
+  suspension_travel: 0.02
+  wheel_query: raycast
+  physx_travel: 0.0
+  bump_stop: 0.06
+  bump_rate: 0.0
+  bump_damping: 0.5
+  physx_substeps: 8
+  substep_threshold_speed: 5.0
+  min_active_slip_denominator: 4.0
+  min_passive_slip_denominator: 4.0
+  min_lateral_slip_denominator: 1.0
+  sticky_tire_threshold_speed: 0.2
+  sticky_tire_threshold_time: 1.0
+  longitudinal_sticky_tire_damping: 200.0
+  lateral_sticky_tire_damping: 200.0
+  release_torque: 1.0
+sensors: {}
