@@ -45,6 +45,8 @@ import os
 import sys
 from pathlib import Path
 
+from . import app_exit
+
 FRAME = 0.05
 SUB = 3
 KMH = 1 / 3.6
@@ -397,34 +399,6 @@ def main(argv=None):
     # no crash uploads; the host's Kit settings (ISAAC_KIT_ARGS), as the runner takes them
     app = SimulationApp({"headless": True, "extra_args": ["--/crashreporter/url="]
                          + os.environ.get("ISAAC_KIT_ARGS", "").split()})
-    import omni.physx
-    import omni.usd
-    from isaacsim.core.api import World
-    from isaacsim.core.utils.stage import add_reference_to_stage
-
-    from pxr import Gf, UsdPhysics
-
-    from .isaac import ground
-    from .isaac.vehicle import Vehicle, ensure_vehicle_scene
-
-    dt = FRAME / SUB
-    world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
-    stage = omni.usd.get_context().get_stage()
-    if args.world:
-        add_reference_to_stage(usd_path=os.path.realpath(args.world), prim_path="/World/env")
-    else:
-        ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
-    ensure_vehicle_scene(stage)
-    scene = next(UsdPhysics.Scene(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Scene))
-    gravity = scene.CreateGravityDirectionAttr()
-    world.reset()
-    world.play()
-    physx = omni.physx.get_physx_interface()
-    pose = ((0.0, 0.0, 0.05), (1.0, 0.0, 0.0, 0.0))
-    veh = Vehicle(stage, "/World/ego", params, rig.make_component(), rig.box_center,
-                  rig.box_dims, pose, truth_settings=rig.component.get("truth"))
-    log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
-             SUB, dt)
     # the rig's fingerprints: what the measurements are of. An override (the ego config's or
     # --set) changes the car the spec describes, so a run with one says the hash is not the car's
     summary = {"powertrain": rig.ecu.powertrain, "overrides": {k: str(v) for k, v in overrides.items()},
@@ -433,7 +407,36 @@ def main(argv=None):
                "isaac_physics_hash_is_the_cars": not overrides,
                "tests": {}}
     only = [t for t in args.only.split(",") if t]
+    code = 0
     try:
+        import omni.physx
+        import omni.usd
+        from isaacsim.core.api import World
+        from isaacsim.core.utils.stage import add_reference_to_stage
+
+        from pxr import Gf, UsdPhysics
+
+        from .isaac import ground
+        from .isaac.vehicle import Vehicle, ensure_vehicle_scene
+
+        dt = FRAME / SUB
+        world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
+        stage = omni.usd.get_context().get_stage()
+        if args.world:
+            add_reference_to_stage(usd_path=os.path.realpath(args.world), prim_path="/World/env")
+        else:
+            ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
+        ensure_vehicle_scene(stage)
+        scene = next(UsdPhysics.Scene(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Scene))
+        gravity = scene.CreateGravityDirectionAttr()
+        world.reset()
+        world.play()
+        physx = omni.physx.get_physx_interface()
+        pose = ((0.0, 0.0, 0.05), (1.0, 0.0, 0.0, 0.0))
+        veh = Vehicle(stage, "/World/ego", params, rig.make_component(), rig.box_center,
+                      rig.box_dims, pose, truth_settings=rig.component.get("truth"))
+        log.info("vehicle %s, powertrain %s, %d x %.4f s per frame", rig.name, rig.ecu.powertrain,
+                 SUB, dt)
         for test, (length, command) in TESTS.items():
             if only and test not in only:
                 continue
@@ -522,10 +525,14 @@ def main(argv=None):
                 m.update(chatter(sub_rows, dt))
             summary["tests"][test] = m
             log.info("%s: %s", test, json.dumps(m))
+    except BaseException as e:  # app.close() would end the process with 0 (scensim issue 118)
+        code = app_exit.code_of(e)
+        if code:
+            summary["error"] = f"{type(e).__name__}: {e}"
     finally:
         (out / "summary.json").write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2), flush=True)
-        app.close()
+        app_exit.close(app, code)
 
 
 if __name__ == "__main__":

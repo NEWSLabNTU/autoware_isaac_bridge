@@ -21,6 +21,8 @@ import argparse
 import json
 import os
 
+from . import app_exit
+
 UNREACHABLE = "http://127.0.0.1:9/Assets/Isaac/6.2"  # the discard port: nothing answers
 CAMERA_AT = (60.0, 40.0, 1.8)
 CAMERA_ROTATE_XYZ = (80.0, 0.0, -90.0)  # -z forward turned to +x, 10 degrees down
@@ -43,17 +45,16 @@ def main(argv=None):
                   "--/persistent/isaac/asset_root/timeout=2.0"]
     app = SimulationApp({"headless": True, "extra_args": extra})
     out = {"ground": "isaac-default" if args.isaac_default else "aib", "online": args.online}
-    ok = False
+    code = 1  # a check that fails is a failed run, as one that raises
     try:
         out.update(_checks(args.isaac_default))
-        ok = all(v for k, v in out.items() if k.endswith("_ok"))
-    except Exception as e:  # printed before app.close(), which ends the process
+        code = 0 if all(v for k, v in out.items() if k.endswith("_ok")) else 1
+    except BaseException as e:  # app.close() would end the process with 0 (scensim issue 118)
+        code = app_exit.code_of(e) or 1
         out["error"] = f"{type(e).__name__}: {e}"
-    out["pass"] = ok
+    out["pass"] = code == 0
     print("GROUND-CHECK " + json.dumps(out), flush=True)
-    if not ok:  # app.close() ends the process with 0, whatever came before
-        os._exit(1)
-    app.close()
+    app_exit.close(app, code)
 
 
 def _checks(isaac_default):
