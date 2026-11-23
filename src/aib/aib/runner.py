@@ -197,6 +197,7 @@ def main(argv=None):
     from isaacsim.core.utils.stage import add_reference_to_stage
 
     from .isaac.ego import Ego
+    from .isaac import ground
     from .isaac.vehicle import ensure_vehicle_scene
     from .ros import EgoRos
 
@@ -214,7 +215,7 @@ def main(argv=None):
     if usd:
         add_reference_to_stage(usd_path=usd, prim_path="/World/env")
     else:
-        world.scene.add_default_ground_plane()
+        ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
     if ensure_light(stage):
         log.info("the world brings no light: a default sun and sky added")
     ensure_vehicle_scene(stage)

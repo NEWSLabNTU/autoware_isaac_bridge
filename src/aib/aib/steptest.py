@@ -404,6 +404,7 @@ def main(argv=None):
 
     from pxr import Gf, UsdPhysics
 
+    from .isaac import ground
     from .isaac.vehicle import Vehicle, ensure_vehicle_scene
 
     dt = FRAME / SUB
@@ -412,7 +413,7 @@ def main(argv=None):
     if args.world:
         add_reference_to_stage(usd_path=os.path.realpath(args.world), prim_path="/World/env")
     else:
-        world.scene.add_default_ground_plane()
+        ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
     ensure_vehicle_scene(stage)
     scene = next(UsdPhysics.Scene(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Scene))
     gravity = scene.CreateGravityDirectionAttr()
