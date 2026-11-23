@@ -18,7 +18,9 @@ force, contact) are read back for the sensors and the host's surface layer.
 Each wheel has its own tire friction table (`/World/vehicleTireFriction/<vehicle>/<wheel>`), with
 no ground materials: its default value is the wheel's friction on whatever it stands on, its
 axle's `tire_friction` (`Vehicle.tire_frictions`) until a host writes another
-(`set_wheel_friction`). A host with a surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
+(`set_wheel_friction`). Every friction here is the spec's mu; PhysX's table is given mu divided
+by `aib.tyre_friction.FILTER_GRIP` (1.154), its tyre's load filter's gain over a car (scensim
+issue 108), so the car's grip is the spec's. A host with a surface map (scensim's surface layer, roadmap 047) writes it every substep from the wheel's
 ground (`contacts`: where, on what, the load it carries and the tire's rolling direction, the
 inputs of scensim's soil layer too); PhysX takes the edit on the next step. The friction-vs-slip graph is
 fixed once the simulation runs (PhysX refuses the edit), so a surface's own slip curve is the
@@ -54,6 +56,7 @@ from ..deps import use
 from ..interfaces import COMMANDS
 from ..frames import qconj, qmul, qrot
 from ..params import G, VehicleParams, road_load
+from ..tyre_friction import WheelFriction
 
 use("sim_vehicle_ecu")
 
@@ -228,11 +231,13 @@ class Vehicle:
         self.wheel_paths = [f"{path}/{name}" for name, _, _ in WHEELS]
         self.wheel_states = None  # WheelState per wheel, after a step
         self.contacts = None  # Contact per wheel, after a step
-        self.friction = []  # each wheel's table's defaultFrictionValue attribute
         # each wheel's axle's tyre (scensim roadmap 091 W24: tires.front, tires.rear)
         self.wheel_tires = [p.wheel_tire(is_front) for _, is_front, _ in WHEELS]
         self.tire_frictions = [float(t["tire_friction"]) for t in self.wheel_tires]  # the bases
-        self.friction_values = list(self.tire_frictions)
+        # the spec's mu per wheel, written to PhysX as mu / FILTER_GRIP (scensim issue 108)
+        self.wheel_friction = WheelFriction(self.tire_frictions)
+        self.friction = self.wheel_friction.attrs  # each wheel's table's defaultFrictionValue
+        self.friction_values = self.wheel_friction.values  # the spec's mu, as set
         self.tires = []  # each wheel's PhysxVehicleTireAPI
         self.tire_base = []  # each wheel's rig (lateral graph (x, y), longitudinal) stiffness
         self.stiffness_values = [(1.0, 1.0)] * len(WHEELS)  # shares of tire_base, as written
@@ -266,7 +271,8 @@ class Vehicle:
                 stage, f"{TIRE_FRICTION}/{path.strip('/').replace('/', '_')}/{name}")
             table.CreateGroundMaterialsRel()
             table.CreateFrictionValuesAttr([])
-            self.friction.append(table.CreateDefaultFrictionValueAttr(self.tire_frictions[i]))
+            self.wheel_friction.attach(
+                table.CreateDefaultFrictionValueAttr(self.wheel_friction.default(i)))
             tire.CreateFrictionTableRel().AddTarget(table.GetPath())
             susp = PhysxSchema.PhysxVehicleSuspensionAPI.Apply(wprim)
             susp.CreateSprungMassAttr(sprung)
@@ -475,10 +481,9 @@ class Vehicle:
 
     def set_wheel_friction(self, i, mu):
         """Wheel `i`'s (WHEELS order) friction from the next step on; written only when it
-        changes, so a host may call it every substep."""
-        if abs(mu - self.friction_values[i]) > 1e-6:
-            self.friction[i].Set(float(mu))
-            self.friction_values[i] = mu
+        changes, so a host may call it every substep. `mu` is the spec's; PhysX is given
+        mu / FILTER_GRIP (aib.tyre_friction, scensim issue 108)."""
+        self.wheel_friction.set(i, mu)
 
     # --- State -----------------------------------------------------------------------------
 
