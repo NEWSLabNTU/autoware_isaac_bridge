@@ -72,14 +72,74 @@ class CodeOfTest(unittest.TestCase):
         self.assertEqual(codes, [0, 0, 2, 1, app_exit.INTERRUPTED, 1])
 
 
-def run_fake(module, *args):
+# the ROS modules aib.runner's node imports, stood in for too
+ROS = ("rclpy,rosgraph_msgs,sensor_msgs,std_msgs,geometry_msgs,nav_msgs,builtin_interfaces,"
+       "diagnostic_msgs,tf2_msgs,autoware_vehicle_msgs,autoware_control_msgs,tier4_vehicle_msgs,"
+       "autoware_perception_msgs,autoware_adapi_v1_msgs")
+
+
+def run_fake(module, *args, extra=""):
     """The entry point under aib.fake_kit: (exit status, stdout + stderr)."""
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+    env = dict(os.environ, FAKE_KIT_EXTRA=extra, PYTHONPATH=os.pathsep.join(
         [str(_paths.PKG)] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]))
     env.pop("ISAAC_KIT_ARGS", None)
     r = subprocess.run([sys.executable, "-m", "aib.fake_kit", module, *args], env=env,
                        capture_output=True, text=True, timeout=120)
     return r.returncode, r.stdout + r.stderr
+
+
+GUARDED = """
+import sys
+from aib import fake_kit
+fake_kit.install()
+from isaacsim import SimulationApp
+from aib import app_exit
+if sys.argv[1] == "wrapper":  # guarded before the app, holding none
+    app_exit.guard()
+app = SimulationApp()
+if sys.argv[1] != "wrapper":
+    app_exit.guard(app)
+if sys.argv[1] in ("raise", "wrapper"):
+    raise RuntimeError("raised at module level")
+
+
+def main():
+    if sys.argv[1] == "exit":
+        raise SystemExit("main refused")
+    if sys.argv[1] == "exit0":
+        raise SystemExit(0)
+
+
+app_exit.run(main)
+app.close()
+"""
+
+
+class GuardTest(unittest.TestCase):
+    def run_script(self, how):
+        env = dict(os.environ, PYTHONPATH=str(_paths.PKG))
+        return subprocess.run([sys.executable, "-c", GUARDED, how], env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_an_escaped_exception_ends_with_1(self):
+        r = self.run_script("raise")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("raised at module level", r.stderr)  # Python's own traceback
+
+    def test_a_wrapper_guarded_before_the_app_ends_with_1(self):
+        r = self.run_script("wrapper")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("raised at module level", r.stderr)
+
+    def test_a_system_exit_out_of_main_keeps_its_status(self):
+        r = self.run_script("exit")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("main refused", r.stderr)
+        self.assertEqual(self.run_script("exit0").returncode, 0)
+
+    def test_a_script_that_ends_closes_with_0(self):
+        r = self.run_script("pass")
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class EntryPointTest(unittest.TestCase):
@@ -91,6 +151,11 @@ class EntryPointTest(unittest.TestCase):
         self.assertIn(fake_kit.FORCED, output)  # its traceback
         self.assertEqual(summary["error"], f"RuntimeError: {fake_kit.FORCED}")
         self.assertEqual(summary["tests"], {})
+
+    def test_runner_that_raises_exits_1(self):
+        code, output = run_fake("aib.runner", "--ego", str(_paths.EGO), extra=ROS)
+        self.assertEqual(code, 1, output)
+        self.assertIn(fake_kit.FORCED, output)
 
     def test_ground_check_that_raises_exits_1(self):
         code, output = run_fake("aib.ground_check")

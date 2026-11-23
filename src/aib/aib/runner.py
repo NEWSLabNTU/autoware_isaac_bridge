@@ -38,6 +38,8 @@ import signal
 import sys
 import time
 
+from . import app_exit
+
 
 # The window's chase view, as scensim's recorder's "road" view (scensim_isaac_world.recorder): 7 m
 # behind base_link, 3.4 m up, pitched 15 deg down, 80 deg across.
@@ -188,102 +190,108 @@ def main(argv=None):
     # "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=1".
     app = SimulationApp({"headless": not args.display, "extra_args": ["--/crashreporter/url="]
                          + os.environ.get("ISAAC_KIT_ARGS", "").split()})
-
-    import omni.kit.app
-    import omni.physx
-    import omni.usd
-    from isaacsim.core.api import World
-    from isaacsim.core.utils.extensions import enable_extension
-    from isaacsim.core.utils.stage import add_reference_to_stage
-
-    from .isaac.ego import Ego
-    from .isaac import ground
-    from .isaac.vehicle import ensure_vehicle_scene
-    from .ros import EgoRos
-
-    for ext in ("isaacsim.sensors.experimental.rtx", "isaacsim.sensors.rtx.nodes"):
-        enable_extension(ext)
-    omni.kit.app.get_app().update()
-    ros = EgoRos.from_config(cfg, rig)
-    ros.publish_clock(0.0)
-    world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
-    stage = omni.usd.get_context().get_stage()
-    usd, projector = world_files(args.world)
-    if args.map_pose is not None:
-        args.pose = world_pose(args.map_pose, args.world)
-    log.info("GNSS projector: %s", projector.name if projector else "TransverseMercator at (0, 0)")
-    if usd:
-        add_reference_to_stage(usd_path=usd, prim_path="/World/env")
-    else:
-        ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
-    if ensure_light(stage):
-        log.info("the world brings no light: a default sun and sky added")
-    ensure_vehicle_scene(stage)
-    world.reset()
-    world.play()
-    physx = omni.physx.get_physx_interface()
-    ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name, projector=projector)
-    # The chassis box is the collider, not a body: the roof lidar sees it (11400 points of
-    # the ego itself in Autoware's obstacle cloud, which then stops for "route-obstacle"), so
-    # hide it from rendering as scensim does when it puts a catalogue body on the ego.
-    from pxr import UsdGeom
-
-    UsdGeom.Imageable(stage.GetPrimAtPath(ego.vehicle.body_path)).MakeInvisible()
-    if cfg.body:
-        from .isaac.body import dress, load_entry
-
-        dress(stage, "/World/ego", load_entry(cfg.body))
-
-    def warm_step():
-        ego.before_substep(dt)
-        world.step(render=True)
-        ego.after_substep(physx, dt)
-
-    if args.display and args.view == "chase":
-        chase_view(stage, "/World/ego")
-    frames = ego.warm_up(warm_step)
-    log.info("ego %s (%s) at %s; sensors warm after %d frame(s); %d substep(s) of %.4f s "
-             "per frame", rig.name, rig.path, args.pose[0], frames, substeps, dt)
-
-    stop = {"now": False}
-
-    def on_signal(signum, _frame):
-        stop["now"] = True
-
-    signal.signal(signal.SIGINT, on_signal)
-    signal.signal(signal.SIGTERM, on_signal)
-    sim_time, frame = 0.0, 0
-    wall0 = time.monotonic()
-    render = ego.renders
+    code = 0
     try:
-        while not stop["now"] and app.is_running():
-            ego.take_commands()
-            for s in range(substeps):
-                ego.before_substep(dt)
-                world.step(render=render and s == substeps - 1)
-                ego.after_substep(physx, dt)
-            sim_time += substeps * dt
-            frame += 1
-            stamp = ros.publish_clock(sim_time)
-            ego.publish(sim_time, stamp)
-            if cycle is not None:
-                ros.publish_signals(cycle.groups_at(sim_time), stamp)
-            if args.duration and sim_time >= args.duration:
-                break
-            if args.realtime:
-                lag = wall0 + sim_time - time.monotonic()
-                if lag > 0:
-                    time.sleep(lag)
-    except BaseException:
-        # logged here: app.close() below ends the process before Python would print it
-        # (a camera's CameraInfo assertion once stopped the runner after one frame, silently)
-        log.exception("the loop raised at frame %d, sim time %.2f s", frame, sim_time)
-        raise
+
+        import omni.kit.app
+        import omni.physx
+        import omni.usd
+        from isaacsim.core.api import World
+        from isaacsim.core.utils.extensions import enable_extension
+        from isaacsim.core.utils.stage import add_reference_to_stage
+
+        from .isaac.ego import Ego
+        from .isaac import ground
+        from .isaac.vehicle import ensure_vehicle_scene
+        from .ros import EgoRos
+
+        for ext in ("isaacsim.sensors.experimental.rtx", "isaacsim.sensors.rtx.nodes"):
+            enable_extension(ext)
+        omni.kit.app.get_app().update()
+        ros = EgoRos.from_config(cfg, rig)
+        ros.publish_clock(0.0)
+        world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
+        stage = omni.usd.get_context().get_stage()
+        usd, projector = world_files(args.world)
+        if args.map_pose is not None:
+            args.pose = world_pose(args.map_pose, args.world)
+        log.info("GNSS projector: %s",
+                 projector.name if projector else "TransverseMercator at (0, 0)")
+        if usd:
+            add_reference_to_stage(usd_path=usd, prim_path="/World/env")
+        else:
+            ground.add_ground_plane(stage)  # local: no asset root (scensim issue 117)
+        if ensure_light(stage):
+            log.info("the world brings no light: a default sun and sky added")
+        ensure_vehicle_scene(stage)
+        world.reset()
+        world.play()
+        physx = omni.physx.get_physx_interface()
+        ego = Ego(rig, ros, stage, "/World/ego", args.pose, name=rig.name, projector=projector)
+        # The chassis box is the collider, not a body: the roof lidar sees it (11400 points of
+        # the ego itself in Autoware's obstacle cloud, which then stops for "route-obstacle"), so
+        # hide it from rendering as scensim does when it puts a catalogue body on the ego.
+        from pxr import UsdGeom
+
+        UsdGeom.Imageable(stage.GetPrimAtPath(ego.vehicle.body_path)).MakeInvisible()
+        if cfg.body:
+            from .isaac.body import dress, load_entry
+
+            dress(stage, "/World/ego", load_entry(cfg.body))
+
+        def warm_step():
+            ego.before_substep(dt)
+            world.step(render=True)
+            ego.after_substep(physx, dt)
+
+        if args.display and args.view == "chase":
+            chase_view(stage, "/World/ego")
+        frames = ego.warm_up(warm_step)
+        log.info("ego %s (%s) at %s; sensors warm after %d frame(s); %d substep(s) of %.4f s "
+                 "per frame", rig.name, rig.path, args.pose[0], frames, substeps, dt)
+
+        stop = {"now": False}
+
+        def on_signal(signum, _frame):
+            stop["now"] = True
+
+        signal.signal(signal.SIGINT, on_signal)
+        signal.signal(signal.SIGTERM, on_signal)
+        sim_time, frame = 0.0, 0
+        wall0 = time.monotonic()
+        render = ego.renders
+        try:
+            while not stop["now"] and app.is_running():
+                ego.take_commands()
+                for s in range(substeps):
+                    ego.before_substep(dt)
+                    world.step(render=render and s == substeps - 1)
+                    ego.after_substep(physx, dt)
+                sim_time += substeps * dt
+                frame += 1
+                stamp = ros.publish_clock(sim_time)
+                ego.publish(sim_time, stamp)
+                if cycle is not None:
+                    ros.publish_signals(cycle.groups_at(sim_time), stamp)
+                if args.duration and sim_time >= args.duration:
+                    break
+                if args.realtime:
+                    lag = wall0 + sim_time - time.monotonic()
+                    if lag > 0:
+                        time.sleep(lag)
+        except BaseException:
+            # its traceback follows (app_exit.code_of); a camera's CameraInfo assertion once
+            # stopped the runner after one frame, silently
+            log.error("the loop raised at frame %d, sim time %.2f s", frame, sim_time)
+            raise
+        finally:
+            log.info("stopping after %d frame(s), sim time %.2f s", frame, sim_time)
+            ego.close()
+            ros.close()
+    except BaseException as e:  # app.close() would end the process with 0 (scensim issue 118)
+        code = app_exit.code_of(e)
     finally:
-        log.info("stopping after %d frame(s), sim time %.2f s", frame, sim_time)
-        ego.close()
-        ros.close()
-        app.close()
+        app_exit.close(app, code)
 
 
 if __name__ == "__main__":
