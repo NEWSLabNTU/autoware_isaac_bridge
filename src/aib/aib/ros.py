@@ -22,6 +22,10 @@ Takes `/control/command/{control_cmd,gear_cmd,turn_indicators_cmd,hazard_lights_
 Control from the ego config's `control_topic`, by default `/control/command/control_cmd`) and
 serves `/control/control_mode_request` (AUTONOMOUS only, as acb).
 
+The ground truth's pose is the body's exact pose after the physics step. Take rates from its
+twist: a heading rate or sideslip from differenced poses lags by half a step
+(`aib.sensing.ground_truth`; scensim issue 104).
+
 With `lockstep` (the ego config's; scensim roadmap 057) the world waits for the ego's localizer:
 before a frame takes its commands, `take_commands` blocks until the localizer has published a
 pose for the last lidar scan sent (a `PoseWithCovarianceStamped` on `lockstep.topic` stamped at

@@ -46,7 +46,15 @@ def gnss_reading(state, t_base_gnss, projector=None):
 def ground_truth(state, map_origin=(0.0, 0.0, 0.0)):
     """base_link's ground truth for one frame: (position in the map, orientation wxyz, body
     velocity, body angular velocity). The map is the world plus `map_origin`, as the GNSS is
-    projected (aib.frames.Projector); the velocities are base_link's, as the velocity report."""
+    projected (aib.frames.Projector); the velocities are base_link's, as the velocity report.
+
+    The pose is the body's exact pose after the physics step. A rate taken by differencing
+    successive poses is not the body's, though (scensim issue 104). PhysX solves a step's
+    velocity first and then moves the body with it, the heading already turned, so the chord
+    between two poses leads the headings read with them by half a step: r dt / 2 for a yaw
+    rate r and the scene's physics step dt (8.3 ms at 60 Hz, 2.1 ms at 240 Hz). A sideslip or
+    heading rate from differenced poses is off by that much. Take rates from the velocities
+    here, which have no such shift."""
     p = tuple(float(a) + float(o) for a, o in zip(state.position, map_origin))
     return (p, tuple(float(c) for c in state.quat), tuple(float(c) for c in state.velocity),
             tuple(float(c) for c in state.angular_velocity))

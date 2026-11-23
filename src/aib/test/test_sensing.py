@@ -230,6 +230,32 @@ class GroundTruthTest(unittest.TestCase):
         self.assertTrue(close(w, (0.0, 0.0, 0.2)))
         self.assertTrue(close(ground_truth(st)[0], st.position))  # no origin: the world
 
+    def test_semi_implicit_chord_lead(self):
+        """Checks the arithmetic of the step order stated in ground_truth's docstring, not that
+        PhysX has that order (scensim issue 104 cites the source: DyBodyCoreIntegrator.h's
+        integrateCore and DyTGSDynamics.cpp's integrateCoreStep, each after the solve). A body
+        on a steady circle, each step's velocity turned with the step's new heading and the
+        body moved by it (frames.advance): the chord between two poses leads their mean heading
+        by r dt / 2, so a sideslip from the poses is off by that, and the velocity, passed
+        through by ground_truth, is not."""
+        dt, r, u, beta = 1 / 60, 0.3, 10.0, -0.02
+        body_v = (u * math.cos(beta), u * math.sin(beta), 0.0)
+        st = State()
+        st.position, st.quat = (0.0, 0.0, 0.0), frames.rpy_quat(0.0, 0.0, 0.4)
+        st.velocity, st.angular_velocity = body_v, (0.0, 0.0, r)
+        poses = []
+        for _ in range(5):
+            q1 = frames.advance(((0, 0, 0), st.quat), (0, 0, 0), (0.0, 0.0, r), dt)[1]
+            st.position, st.quat = frames.advance((st.position, st.quat),
+                                                  frames.qrot(q1, body_v), (0.0, 0.0, r), dt)
+            p, q, v, w = ground_truth(st)
+            self.assertTrue(close(v, body_v) and close(w, (0.0, 0.0, r)))
+            poses.append((p, q))
+        yaw = [2 * math.atan2(q[3], q[0]) for _, q in poses]
+        for (p0, _), (p1, _), y0, y1 in zip(poses, poses[1:], yaw, yaw[1:]):
+            chord = math.atan2(p1[1] - p0[1], p1[0] - p0[0])
+            self.assertAlmostEqual(chord - (y0 + y1) / 2 - beta, r * dt / 2, places=12)
+
     def test_the_covariance_is_diagonal(self):
         c = pose_covariance((0.01, 0.0003))
         self.assertEqual(len(c), 36)
