@@ -15,7 +15,7 @@ import os
 
 from .. import intensity as intensitymod
 from .. import lidar_profile as lidarprof
-from ..frames import advance, compose, qrot, rpy_quat
+from ..frames import advance, compose, invert, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
                        gnss_reading, imu_reading, laser_scan_ranges, laser_scan_settings,
                        motion_distort, pack_cloud, point_times, sample_index)
@@ -38,6 +38,21 @@ def _matrix(q):
     import numpy as np
 
     return np.array([qrot(q, e) for e in ((1, 0, 0), (0, 1, 0), (0, 0, 1))]).T
+
+
+def _offset_in(stage, path, root):
+    """The prim at `path` in the prim at `root` as (translation, quaternion), rounded to 1e-9
+    (identity when they are one prim)."""
+    from pxr import UsdGeom
+
+    if path == root:
+        return ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0))
+    m, _ = UsdGeom.XformCache().ComputeRelativeTransform(stage.GetPrimAtPath(path),
+                                                        stage.GetPrimAtPath(root))
+    t = tuple(round(float(v), 9) for v in m.ExtractTranslation())
+    r = m.ExtractRotationQuat()
+    q = tuple(round(float(v), 9) for v in (r.GetReal(), *r.GetImaginary()))
+    return (t, q)
 
 
 # The lidars: beside the vehicles, not under them (`Lidar`)
@@ -154,6 +169,16 @@ class Lidar:
             kept = Lidar.kept[root] = (lidar.paths[0], rp, annotator, ops, ids)
             self.fresh = 0
         path, self.render_product, self.annotator, (self.translate, self.orient), self.ids = kept
+        # scensim issue 167: an asset may put its OmniLidar below the prim aib places (Isaac's
+        # OS1: its `sensor` 36.22 mm above `lidar`), and the points are measured from the
+        # OmniLidar. The root goes where the OmniLidar then lands at the rig's mount, so the
+        # points come from where the vehicle's TF says the lidar is.
+        self.sensor_mount = self.mount
+        self.offset = _offset_in(stage, path, root)
+        if self.offset != ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)):
+            self.mount = compose(self.sensor_mount, invert(self.offset))
+            log.info("lidar %s: its OmniLidar at %s in its root (%s): the root placed so it is at "
+                     "the rig's mount", rig.name, tuple(round(v, 5) for v in self.offset[0]), path)
         self.stage = stage
         table = rig.isaac.get("intensity")
         self.table = intensitymod.Table(table) if table else None
@@ -208,10 +233,13 @@ class Lidar:
     def before_substep(self, vehicle, state, dt):
         from pxr import Gf
 
-        (x, y, z), q = compose(_pose_after(vehicle, state, dt), self.mount)
+        after = _pose_after(vehicle, state, dt)
+        (x, y, z), q = compose(after, self.mount)  # the root
         self.clock += dt
-        # the track is the sensor's motion only: the phase turn is undone whole by unturn
-        self.track.append((self.clock, (x, y, z), tuple(q)))
+        # the track is the sensor's motion only (its OmniLidar's, issue 167): the phase turn is
+        # undone whole by unturn
+        st, sq = compose(after, self.sensor_mount)
+        self.track.append((self.clock, tuple(st), tuple(sq)))
         if self.delta:
             _, q = compose(((x, y, z), q), ((0.0, 0.0, 0.0), rpy_quat(0.0, 0.0, math.radians(self.delta))))
         self.translate.Set(Gf.Vec3d(x, y, z))

@@ -41,6 +41,15 @@ def compose(a, b):
     return (tuple(x + y for x, y in zip(ta, r)), qmul(qa, qb))
 
 
+def invert(a):
+    """The inverse of transform `a` (translation, quaternion): compose(a, invert(a)) is the
+    identity."""
+    t, q = a
+    qi = qconj(q)
+    r = qrot(qi, t)
+    return ((-r[0], -r[1], -r[2]), qi)
+
+
 def advance(pose, velocity, angular_velocity, dt):
     """`pose` (translation, quaternion) moved on for `dt` s at `velocity` (world frame, m/s)
     and `angular_velocity` (body frame, rad/s): where a body will be after a step."""

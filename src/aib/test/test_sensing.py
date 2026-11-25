@@ -363,3 +363,22 @@ def test_a_planar_lidar_bins_into_urg_node_s_layout():
     with pytest.raises(ValueError, match="one-ring"):
         laser_scan_settings({"angle_min_deg": -135, "angle_max_deg": 135, "beams": 1081},
                             {**prof, "channels": 16})
+
+
+def test_invert_and_the_lidar_mount_compensation():
+    """scensim issue 167: the root placed at mount . invert(offset) puts an OmniLidar that sits
+    at `offset` in its root exactly at the rig's mount."""
+    mount = ((0.9, 0.0, 2.0), frames.rpy_quat(-0.001, 0.015, 1.5386))
+    offset = ((0.0, 0.0, 0.03622), (1.0, 0.0, 0.0, 0.0))
+    ident = frames.compose(offset, frames.invert(offset))
+    assert max(abs(v) for v in ident[0]) < 1e-12
+    assert max(abs(a - b) for a, b in zip(ident[1], (1.0, 0.0, 0.0, 0.0))) < 1e-12
+    root = frames.compose(mount, frames.invert(offset))
+    t, q = frames.compose(root, offset)
+    assert max(abs(a - b) for a, b in zip(t, mount[0])) < 1e-12
+    assert max(abs(a - b) for a, b in zip(q, mount[1])) < 1e-12
+    # a turned offset too
+    turned = ((0.01, -0.02, 0.03), frames.rpy_quat(0.1, -0.2, 0.3))
+    t, q = frames.compose(frames.compose(mount, frames.invert(turned)), turned)
+    assert max(abs(a - b) for a, b in zip(t, mount[0])) < 1e-12
+    assert max(abs(a - b) for a, b in zip(q, mount[1])) < 1e-12
