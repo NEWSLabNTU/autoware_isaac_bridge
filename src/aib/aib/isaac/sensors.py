@@ -17,7 +17,6 @@ from .. import intensity as intensitymod
 from .. import lidar_profile as lidarprof
 from ..frames import advance, compose, invert, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, GnssNoise, Periodic,
-                       RenderPose, earlier,
                        ScanGate, Ticks, gnss_ins_orientation, gnss_noise_settings,
                        gnss_reading, imu_reading,
                        laser_scan_ranges, laser_scan_settings, motion_distort, pack_cloud,
@@ -219,11 +218,7 @@ class Lidar:
         self.pub, _ = ros.sensor_publisher(rig)
         self.pending = None
         self.latency = int(rig.isaac.get("latency_frames", 2))
-        # the last frames' stamps, each at the pose its render took (scensim issue 196), and how
-        # far before its frame's end that pose was
-        self.stamps = collections.deque(maxlen=self.latency + 1)
-        self.backs = collections.deque(maxlen=self.latency + 1)
-        self.render = RenderPose()
+        self.stamps = collections.deque(maxlen=self.latency + 1)  # the last frames' stamps
         self.deltas = collections.deque(maxlen=self.latency + 1)  # their phase turns (084e)
         aedt = self.point_format == "xyzircaedt"
         self.per_scan = rig.isaac.get("publish", "scan") == "scan"
@@ -243,8 +238,6 @@ class Lidar:
         after = _pose_after(vehicle, state, dt)
         (x, y, z), q = compose(after, self.mount)  # the root
         self.clock += dt
-        if dt > 0:
-            self.render.substep(self.clock)
         # the track is the sensor's motion only (its OmniLidar's, issue 167): the phase turn is
         # undone whole by unturn
         st, sq = compose(after, self.sensor_mount)
@@ -267,9 +260,7 @@ class Lidar:
         if self.pending is not None:
             self.pub.publish(self.pending)
             self.ros.note_scan(self.pending.header.stamp)  # what the lockstep waits for
-        back = self.render.frame_done()          # the render took the pose this long before
-        self.backs.append(back)
-        self.stamps.append(earlier(stamp, back))
+        self.stamps.append(stamp)
         self.deltas.append(self.delta)          # the turn this frame was rendered with
         if self.jitter:
             self.delta = self.jitter.next()
@@ -284,16 +275,6 @@ class Lidar:
         # the data read now was rendered `latency` frames ago: until then there is no stamp for it
         self.pending = (self._msg(self.stamps[0], sim_time - self.clock)
                         if len(self.stamps) > self.latency else None)
-
-    def skip_frame(self):
-        """A frame stepped without a publish (the ego's warm-up): its substeps are not the next
-        published frame's (scensim issue 196)."""
-        self.render.frame_done()
-
-    def render_t_ref(self):
-        """The world clock of the pose the scan read now was rendered from: `latency` frames
-        back, and that frame's render pose before its end (scensim issue 196)."""
-        return self.clock - self.latency * self.frame_dt - (self.backs[0] if self.backs else 0.0)
 
     def _msg(self, stamp, to_sim):
         """The scan the annotator holds, or None (nothing yet, or `publish: scan` and this
@@ -337,7 +318,7 @@ class Lidar:
             stamp = self.ros.stamp(t0 * 1e-9 + to_sim)
             if self.distort and len(self.track) > 1:
                 # rendered from the pose `latency` frames back; fired over the revolution
-                t_ref = self.render_t_ref()
+                t_ref = self.clock - self.latency * self.frame_dt
                 tr = list(self.track)
                 xyz = motion_distort(xyz, ts.astype(np.float64) * 1e-9, t_ref,
                                      [a for a, _, _ in tr], [b for _, b, _ in tr],
