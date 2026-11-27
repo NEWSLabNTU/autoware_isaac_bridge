@@ -123,6 +123,19 @@ def world_files(world):
     return usd, Projector.from_map(map_dir, origin)
 
 
+def check_gnss_projector(rig, projector, world):
+    """Refuse, at start and by name, an enabled GNSS on a map whose projector has no inverse
+    (Local, LocalCartesian, ...: indoor or local maps, the golf cart's basements), rather than
+    on its first fix mid-run. Such a map has no pose-free start yet (scensim issue 195)."""
+    if projector is None or not projector.unsupported:
+        return
+    gnss = [s.name for s in rig.of_type("gnss")]
+    if gnss:
+        raise ValueError(f"{world}: the map's projector_type is {projector.unsupported}, which a "
+                         f"GNSS fix has no inverse through; disable the rig's GNSS ({', '.join(gnss)}) "
+                         "for this map (indoor or Local maps: no pose-free start yet)")
+
+
 def world_pose(map_pose, world):
     """A map-frame pose in the world: a world.yaml's map_origin taken off (z by a 5 cm drop, as
     a spawn); with no world.yaml the frames are the same."""
@@ -213,6 +226,7 @@ def main(argv=None):
         world = World(stage_units_in_meters=1.0, physics_dt=dt, rendering_dt=dt)
         stage = omni.usd.get_context().get_stage()
         usd, projector = world_files(args.world)
+        check_gnss_projector(rig, projector, args.world)
         if args.map_pose is not None:
             args.pose = world_pose(args.map_pose, args.world)
         log.info("GNSS projector: %s",

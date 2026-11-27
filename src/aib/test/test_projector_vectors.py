@@ -63,3 +63,23 @@ class ProjectorVectorsTest(unittest.TestCase):
             frames.Projector.from_info({"projector_type": "Polar"})
         self.assertEqual(frames.Projector.from_info({}).lat_lon_alt(10.0, 20.0, 0.0),
                          frames.Projector().lat_lon_alt(10.0, 20.0, 0.0))
+
+
+class GnssAtStartTest(unittest.TestCase):
+    """An enabled GNSS on a Local map is refused when the stack starts, by name, not on its
+    first fix mid-run (scensim issue 195: indoor or Local maps have no pose-free start yet)."""
+
+    def rig(self, gnss):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(of_type=lambda kind: [SimpleNamespace(name="gnss")] if gnss else [])
+
+    def test_a_local_map_with_a_gnss_is_refused_at_start(self):
+        from aib.runner import check_gnss_projector
+
+        local = frames.Projector.from_info({"projector_type": "Local"})
+        with self.assertRaisesRegex(ValueError, "Local.*disable the rig's GNSS \\(gnss\\)"):
+            check_gnss_projector(self.rig(True), local, "basement/isaac/world.yaml")
+        check_gnss_projector(self.rig(False), local, "basement/isaac/world.yaml")
+        check_gnss_projector(self.rig(True), frames.Projector(), "town01/isaac/world.yaml")
+        check_gnss_projector(self.rig(True), None, "")
