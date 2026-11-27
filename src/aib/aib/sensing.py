@@ -33,14 +33,84 @@ def imu_reading(state, q_base_imu):
     return qmul(state.quat, q_base_imu), gyro, acc
 
 
-def gnss_reading(state, t_base_gnss, projector=None):
-    """(lat, lon, altitude) of the antenna at `t_base_gnss` in base_link, by the map's
+def gnss_reading(state, t_base_gnss, projector=None, offset=(0.0, 0.0, 0.0)):
+    """(lat, lon, altitude) of the antenna at `t_base_gnss` in base_link, moved by `offset`
+    (east, north, up in the map, m: the receiver's error, GnssNoise.offset), by the map's
     projector (an aib.frames.Projector; none: TransverseMercator at (0, 0))."""
-    p = tuple(a + b for a, b in zip(state.position, qrot(state.quat, t_base_gnss)))
+    p = tuple(a + b + e for a, b, e in zip(state.position, qrot(state.quat, t_base_gnss), offset))
     if projector is not None:
         return projector.lat_lon_alt(*p)
     lat, lon = lat_lon(p[0], p[1])
     return lat, lon, float(p[2])
+
+
+# The GNSS receiver's error (scensim issue 195 A9): an RTK fix's, 2 cm horizontally and twice
+# that vertically, by default. Kept here rather than in the vehicle spec, so a receiver default
+# does not move every spec_hash; a project overrides it in the ego config's `gnss`. acb has the
+# same model and the same names (its gnss_noise_* parameters).
+GNSS_NOISE_DEFAULTS = {"enabled": True, "horizontal_stddev_m": 0.02, "vertical_stddev_m": 0.04,
+                       "bias_stddev_m": 0.0, "seed": None}
+# sensor_msgs/NavSatFix position_covariance_type
+COVARIANCE_TYPE_UNKNOWN, COVARIANCE_TYPE_DIAGONAL_KNOWN = 0, 2
+
+
+def gnss_noise_settings(over):
+    """GNSS_NOISE_DEFAULTS with `over` on top, checked: ValueError names the bad key."""
+    over = dict(over or {})
+    unknown = set(over) - set(GNSS_NOISE_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unknown key(s) {sorted(unknown)}; the keys are "
+                         f"{', '.join(GNSS_NOISE_DEFAULTS)}")
+    s = {**GNSS_NOISE_DEFAULTS, **over}
+    if not isinstance(s["enabled"], bool):
+        raise ValueError(f"enabled must be true or false, is {s['enabled']!r}")
+    for k in ("horizontal_stddev_m", "vertical_stddev_m", "bias_stddev_m"):
+        if isinstance(s[k], bool) or not isinstance(s[k], (int, float)) or not s[k] >= 0.0:
+            raise ValueError(f"{k} must be >= 0 (m), is {s[k]!r}")
+        s[k] = float(s[k])
+    seed = s["seed"]
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+        raise ValueError(f"seed must be an integer >= 0, or null for a fresh one, is {seed!r}")
+    return s
+
+
+class GnssNoise:
+    """One receiver's error, east, north and up in the map (m): a bias drawn once from
+    N(0, bias_stddev_m) on each axis, plus white noise per fix from N(0, horizontal_stddev_m)
+    east and north and N(0, vertical_stddev_m) up. Seeded: the same seed gives the same fixes;
+    no seed draws one, kept in `seed` so the run can be replayed. Disabled: no error at all,
+    and no covariance claimed (today's truth)."""
+
+    def __init__(self, settings):
+        import secrets
+
+        import numpy as np
+
+        self.settings = settings
+        self.enabled = settings["enabled"]
+        self.seed = settings["seed"] if settings["seed"] is not None else secrets.randbits(63)
+        self._rng = np.random.default_rng(self.seed)
+        h, v, b = (settings["horizontal_stddev_m"], settings["vertical_stddev_m"],
+                   settings["bias_stddev_m"])
+        self._sigma = np.array([h, h, v])
+        self._b = b
+        self.bias = (tuple(float(x) for x in self._rng.normal(0.0, b, 3)) if self.enabled
+                     else (0.0, 0.0, 0.0))
+
+    def offset(self):
+        if not self.enabled:
+            return (0.0, 0.0, 0.0)
+        w = self._rng.normal(0.0, self._sigma)
+        return tuple(float(a + e) for a, e in zip(self.bias, w))
+
+    def covariance(self):
+        """(NavSatFix position_covariance, its type): the variance of white noise plus the bias's
+        spread on the diagonal, known; disabled, zeros of unknown type."""
+        if not self.enabled:
+            return [0.0] * 9, COVARIANCE_TYPE_UNKNOWN
+        var = [float(s) ** 2 + self._b ** 2 for s in self._sigma]
+        return ([var[0], 0.0, 0.0, 0.0, var[1], 0.0, 0.0, 0.0, var[2]],
+                COVARIANCE_TYPE_DIAGONAL_KNOWN)
 
 
 def ground_truth(state, map_origin=(0.0, 0.0, 0.0)):

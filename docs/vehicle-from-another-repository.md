@@ -30,7 +30,8 @@ environment variables in a path expand.
   to the spec. A sensor's `isaac.usd` (an RTX lidar profile of your own) is relative to the
   rig too.
 - **The ego config** (aib's `EgoConfig`): `rig:`, and optionally `body:`, `domain:`, the
-  overrides (`vehicle`, `ecu`, `sensors`), `control_topic`, `lockstep`, `ground_truth`.
+  overrides (`vehicle`, `ecu`, `sensors`), `control_topic`, `lockstep`, `ground_truth`, `gnss`
+  (the receiver's error, below).
   Without `domain:` the ego's nodes join `ROS_DOMAIN_ID` (0 when unset), so the terminal that
   starts it chooses, as it does for any ROS node.
 

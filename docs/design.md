@@ -236,7 +236,20 @@ against acceptance.py's 0.35. One run each, a 70 m route at up to 4.3 m/s.
 | lidar | RTX lidar (`isaacsim.sensors.experimental.rtx`), the rig's `isaac.config` / `variant` | PointCloud2 x y z intensity return_type channel | channel from the elevation's rank among `channels`; stamped at its render (`isaac.latency_frames`), sent one frame late |
 | camera | USD camera + `rgb` annotator, focal length from the horizontal FOV | Image rgb8 + CameraInfo (K from the spec) | off in the shipped rig; untested on Isaac |
 | imu | from the state | Imu: orientation, angular velocity, specific force (acceleration minus gravity) in the IMU frame | every frame unless `rate_hz` |
-| gnss | from the state | NavSatFix, GBAS fix, lat/lon by the map's projector: MGRS about `map_origin` with `world:=<map>/isaac/world.yaml`, else TransverseMercator at (0, 0) | `rate_hz` (10) |
+| gnss | from the state, plus the receiver's error | NavSatFix, GBAS fix, lat/lon by the map's projector: MGRS about `map_origin` with `world:=<map>/isaac/world.yaml`, else TransverseMercator at (0, 0); `position_covariance` diagonal, known | `rate_hz` (10); the ego config's `gnss` |
+
+The GNSS's error (scensim issue 195 A9; `aib.sensing.GnssNoise`): the antenna's true position,
+moved east, north and up in the map before it is projected, by a bias drawn once per run from
+N(0, `bias_stddev_m`) on each axis plus white noise per fix from N(0, `horizontal_stddev_m`)
+east and north and N(0, `vertical_stddev_m`) up. The defaults are an RTK fix's: 0.02, 0.04 and
+0 m. `position_covariance` is the diagonal of those variances (the bias's added),
+COVARIANCE_TYPE_DIAGONAL_KNOWN. The ego config's `gnss: {enabled, horizontal_stddev_m,
+vertical_stddev_m, bias_stddev_m, seed}` overrides any of them; `seed` (an integer >= 0) makes
+the fixes reproducible, and without one the receiver draws a seed and logs it ("GNSS gnss: ...
+seed N"), which replays the run. `enabled: false` publishes the true position with no
+covariance, as before. acb's CARLA GNSS has the same model under the same names
+(`gnss_noise_*` parameters). The defaults live here, not in the vehicle spec: a receiver default
+is not worth moving every spec_hash.
 
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),

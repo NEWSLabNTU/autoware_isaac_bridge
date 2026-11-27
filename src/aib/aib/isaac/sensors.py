@@ -16,9 +16,10 @@ import os
 from .. import intensity as intensitymod
 from .. import lidar_profile as lidarprof
 from ..frames import advance, compose, invert, qrot, rpy_quat
-from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, Periodic, ScanGate, Ticks,
-                       gnss_reading, imu_reading, laser_scan_ranges, laser_scan_settings,
-                       motion_distort, pack_cloud, point_times, sample_index)
+from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, GnssNoise, Periodic,
+                       ScanGate, Ticks, gnss_noise_settings, gnss_reading, imu_reading,
+                       laser_scan_ranges, laser_scan_settings, motion_distort, pack_cloud,
+                       point_times, sample_index)
 
 log = logging.getLogger("aib")
 
@@ -586,8 +587,9 @@ class Imu:
 
 
 class Gnss:
-    """From the vehicle's pose: a GBAS fix at the antenna, by the map's projector (`projector`,
-    set by Ego; none: TransverseMercator at (0, 0))."""
+    """From the vehicle's pose: a GBAS fix at the antenna, with the receiver's error
+    (`rig.noise`, aib.sensing.GnssNoise), by the map's projector (`projector`, set by Ego; none:
+    TransverseMercator at (0, 0))."""
 
     renders = False
 
@@ -596,6 +598,12 @@ class Gnss:
         self.projector = None
         self.pub, _ = ros.sensor_publisher(rig)
         self.timer = Periodic(rig.period or 0.1)
+        self.noise = GnssNoise(gnss_noise_settings(rig.noise))
+        s = self.noise.settings
+        log.info("GNSS %s: %s", rig.name,
+                 f"error east/north {s['horizontal_stddev_m']} m, up {s['vertical_stddev_m']} m, "
+                 f"bias {s['bias_stddev_m']} m, seed {self.noise.seed}" if self.noise.enabled
+                 else "no error (gnss.enabled false): the antenna's true position")
 
     def ready(self):
         return True
@@ -603,14 +611,15 @@ class Gnss:
     def publish(self, state, sim_time, stamp):
         if not self.timer.due(sim_time):
             return
-        lat, lon, alt = gnss_reading(state, self.rig.translation, self.projector)
+        lat, lon, alt = gnss_reading(state, self.rig.translation, self.projector,
+                                     self.noise.offset())
         msg = self.ros.m["NavSatFix"]()
         msg.header.stamp = stamp
         msg.header.frame_id = self.rig.frame
         msg.status.status = 2  # GBAS_FIX, as acb
         msg.status.service = 1
         msg.latitude, msg.longitude, msg.altitude = lat, lon, alt
-        msg.position_covariance_type = 0
+        msg.position_covariance, msg.position_covariance_type = self.noise.covariance()
         self.pub.publish(msg)
 
     def before_substep(self, vehicle, state, dt):

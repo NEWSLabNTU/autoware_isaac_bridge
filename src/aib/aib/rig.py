@@ -38,6 +38,9 @@ class SensorRig:
     quat: tuple  # w, x, y, z
     extra: dict = field(default_factory=dict)  # channels, width, k, info_topic, ...
     isaac: dict = field(default_factory=dict)
+    # a GNSS's receiver error (aib.sensing.gnss_noise_settings); {}: GNSS_NOISE_DEFAULTS. The
+    # ego config's `gnss` sets it (EgoConfig.load_rig)
+    noise: dict = field(default_factory=dict)
 
     @property
     def transform(self):
@@ -225,6 +228,10 @@ class EgoConfig:
     # The ego's body (aib.isaac.body; scensim's Isaac world server too): a vehicle catalogue entry
     # (a car's entry.json), relative to this file; empty: the box and cylinders show.
     body: str = ""
+    # The GNSS receiver's error (scensim issue 195 A9; aib.sensing.GnssNoise): each key defaulting
+    # to aib.sensing.GNSS_NOISE_DEFAULTS (an RTK fix: 2 cm east and north, 4 cm up, no bias,
+    # a fresh seed, logged). {enabled: false} publishes the antenna's true position.
+    gnss: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path):
@@ -261,6 +268,12 @@ class EgoConfig:
         if vi["profile"] != "autoware" and cfg.lockstep:
             raise ValueError(f"{path}: lockstep waits for Autoware's localizer; the "
                              f"{vi['profile']} vehicle interface has none: drop the lockstep")
+        from .sensing import gnss_noise_settings
+
+        try:
+            cfg.gnss = gnss_noise_settings(cfg.gnss)
+        except ValueError as e:
+            raise ValueError(f"{path}: gnss: {e}") from None
         if cfg.ground_truth:
             unknown = set(cfg.ground_truth) - set(GROUND_TRUTH_DEFAULTS)
             if unknown:
@@ -274,4 +287,7 @@ class EgoConfig:
         return cfg
 
     def load_rig(self):
-        return Rig.load(self.rig, self.vehicle, self.sensors, self.ecu, self.component)
+        rig = Rig.load(self.rig, self.vehicle, self.sensors, self.ecu, self.component)
+        for s in rig.of_type("gnss", enabled_only=False):
+            s.noise = dict(self.gnss)
+        return rig
