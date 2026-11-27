@@ -264,6 +264,14 @@ consecutive fixes, random at a standstill under the position noise, which swung 
 lever arm from the antenna to base_link. The message bindings for Isaac's Python come from
 `build_msgs.sh`, whose default list now has autoware_sensing_msgs (`scensim isaac msgs`).
 
+The orientation goes out before its fix, and the first fix is held until the orientation has
+gone out for two GNSS periods (`INS_HOLD_PERIODS`; scensim issue 195 L1c). gnss_poser
+(autoware_core 1.5.0) starts from a default GnssInsOrientationStamped, an identity quaternion
+with rmse 1.0, and publishes every fix with the last orientation it received: a fix that reached
+it first became a GNSS pose at yaw 0, the gnss mount's yaw off on the Model 3 (0.036 rad). Publish
+order is no delivery order across two DDS topics, so the hold gives two periods' margin. It is
+once per sensor: a teleport does not hold the fix again, gnss_poser keeping its last orientation.
+
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),
 so Autoware's sensing launch and scensim's runs see what they see on CARLA. The IMU and

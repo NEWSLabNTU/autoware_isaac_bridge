@@ -606,6 +606,10 @@ class Imu:
         pass
 
 
+# L1c (scensim issue 195): GNSS periods the orientation goes out before the first fix
+INS_HOLD_PERIODS = 2
+
+
 class Gnss:
     """From the vehicle's pose: a GBAS fix at the antenna, with the receiver's error
     (`rig.noise`, aib.sensing.GnssNoise), by the map's projector (`projector`, set by Ego; none:
@@ -621,6 +625,7 @@ class Gnss:
         self.pub, self.ins_pub = ros.sensor_publisher(rig)
         self.timer = Periodic(rig.period or 0.1)
         self.noise = GnssNoise(gnss_noise_settings(rig.noise))
+        self.ins_sent, self.fix_sent = 0, False  # L1c: the orientations published; the first fix
         s = self.noise.settings
         log.info("GNSS %s: %s", rig.name,
                  f"error east/north {s['horizontal_stddev_m']} m, up {s['vertical_stddev_m']} m, "
@@ -643,7 +648,13 @@ class Gnss:
         msg.status.service = 1
         msg.latitude, msg.longitude, msg.altitude = lat, lon, alt
         msg.position_covariance, msg.position_covariance_type = self.noise.covariance()
-        self.pub.publish(msg)
+        # L1c: the orientation first, and the fix held until the orientation has gone out for
+        # INS_HOLD_PERIODS GNSS periods. gnss_poser (autoware_core 1.5.0) starts from a default
+        # GnssInsOrientationStamped, an identity quaternion, and publishes every fix with the
+        # last orientation it received, so a fix ahead of any orientation became a GNSS pose at
+        # yaw 0. Publish order alone is no delivery order across two DDS topics; the hold gives
+        # the orientation two periods' margin. Once, for the life of this sensor: a teleport
+        # (a scenario's reset) does not hold it again, gnss_poser keeping its last orientation.
         if self.ins_pub is not None:
             o = self.ros.m["GnssInsOrientationStamped"]()
             o.header.stamp = msg.header.stamp
@@ -655,6 +666,14 @@ class Gnss:
             (o.orientation.rmse_rotation_x, o.orientation.rmse_rotation_y,
              o.orientation.rmse_rotation_z) = self.noise.rmse_rotation()
             self.ins_pub.publish(o)
+            self.ins_sent += 1
+            if self.ins_sent <= INS_HOLD_PERIODS:
+                return
+        if not self.fix_sent:
+            log.info("GNSS %s: the first fix, %d GNSS period(s) after the first orientation",
+                     self.rig.name, self.ins_sent - 1 if self.ins_pub is not None else 0)
+            self.fix_sent = True
+        self.pub.publish(msg)
 
     def before_substep(self, vehicle, state, dt):
         pass  # read from the vehicle's state

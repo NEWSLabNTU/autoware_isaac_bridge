@@ -235,10 +235,11 @@ class GnssSensorTest(unittest.TestCase):
                               sensor_publisher=lambda s: (nav, ins))
         g = Gnss(rig, ros)
         state = State(position=(10.0, 2.0, 0.0), quat=frames.rpy_quat(0, 0, 0.3))
-        g.publish(state, 0.0, "STAMP")
+        for k in range(3):  # L1c: the first fix goes out on the third tick
+            g.publish(state, 0.1 * k, f"STAMP{k}")
         self.assertEqual(len(nav.sent), 1)
-        self.assertEqual(len(ins.sent), 1)
-        fix, o = nav.sent[0], ins.sent[0]
+        self.assertEqual(len(ins.sent), 3)
+        fix, o = nav.sent[0], ins.sent[2]
         self.assertEqual(o.header.stamp, fix.header.stamp)
         self.assertEqual(o.header.frame_id, fix.header.frame_id)
         self.assertEqual(o.header.frame_id, "gnss_link")
@@ -284,3 +285,73 @@ class InsStreamTest(unittest.TestCase):
         bias = rng.normal(0.0, 0.1, 3)
         first = bias + rng.normal(0.0, np.array([0.02, 0.02, 0.04]))
         self.assertTrue(np.allclose(a[0], first, rtol=0, atol=1e-15))
+
+
+# --- L1c (scensim issue 195): the orientation before the fix, the fix held for 2 GNSS periods ---
+
+class _Seq:
+    """Both publishers in one, recording the order the messages went out."""
+
+    def __init__(self):
+        self.sent = []
+
+    def pub(self, name):
+        seq = self
+
+        class P:
+            def publish(self, m):
+                seq.sent.append((name, m))
+        return P()
+
+
+class GnssHoldTest(unittest.TestCase):
+    def gnss(self, noise=None):
+        from aib.isaac.sensors import Gnss
+        from aib.rig import Rig
+
+        rig = Rig.load(RIG).sensors["gnss"]
+        rig.noise = noise or {"seed": 2}
+        seq = _Seq()
+        ros = SimpleNamespace(m={"NavSatFix": _nav, "GnssInsOrientationStamped": _ins},
+                              sensor_publisher=lambda s: (seq.pub("fix"), seq.pub("ins")))
+        return Gnss(rig, ros), seq, rig.period
+
+    def test_the_first_fix_only_after_two_orientation_periods(self):
+        g, seq, dt = self.gnss()
+        state = State(position=(5.0, 1.0, 0.0), quat=frames.rpy_quat(0, 0, 0.2))
+        for k in range(5):
+            g.publish(state, k * dt, f"S{k}")
+        names = [n for n, _ in seq.sent]
+        self.assertEqual(names, ["ins", "ins", "ins", "fix", "ins", "fix", "ins", "fix"])
+        first_ins = seq.sent[0][1].header.stamp
+        first_fix = next(m for n, m in seq.sent if n == "fix").header.stamp
+        self.assertEqual((first_ins, first_fix), ("S0", "S2"))  # 2 periods apart
+
+    def test_within_a_frame_the_orientation_goes_first_with_the_same_stamp(self):
+        g, seq, dt = self.gnss()
+        state = State(position=(5.0, 1.0, 0.0), quat=frames.rpy_quat(0, 0, 0.2))
+        for k in range(6):
+            g.publish(state, k * dt, f"S{k}")
+        for (n0, m0), (n1, m1) in zip(seq.sent, seq.sent[1:]):
+            if n1 == "fix":
+                self.assertEqual(n0, "ins")
+                self.assertEqual(m0.header.stamp, m1.header.stamp)
+                self.assertEqual(m0.header.frame_id, m1.header.frame_id)
+
+    def test_a_teleport_does_not_hold_the_fix_again(self):
+        g, seq, dt = self.gnss()
+        here = State(position=(5.0, 1.0, 0.0), quat=frames.rpy_quat(0, 0, 0.2))
+        there = State(position=(400.0, -3.0, 0.0), quat=frames.rpy_quat(0, 0, 3.0))
+        for k in range(3):
+            g.publish(here, k * dt, f"S{k}")
+        before = sum(1 for n, _ in seq.sent if n == "fix")
+        g.publish(there, 3 * dt, "S3")  # the scenario's reset moved the car
+        self.assertEqual(sum(1 for n, _ in seq.sent if n == "fix"), before + 1)
+
+    def test_the_hold_counts_published_orientations_not_calls(self):
+        """A call between GNSS periods publishes nothing and does not shorten the hold."""
+        g, seq, dt = self.gnss()
+        state = State(position=(5.0, 1.0, 0.0))
+        for t in (0.0, dt / 2, dt, 1.5 * dt, 2 * dt):
+            g.publish(state, t, f"T{t:.3f}")
+        self.assertEqual([n for n, _ in seq.sent], ["ins", "ins", "ins", "fix"])
