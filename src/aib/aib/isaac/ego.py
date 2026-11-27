@@ -70,6 +70,9 @@ class Ego:
             return 0
         for i in range(frames):
             step()
+            for s in self.sensors:  # a frame no publish ends (scensim issue 196)
+                if hasattr(s, "skip_frame"):
+                    s.skip_frame()
             if all(s.ready() for s in self.sensors):
                 return i + 1
         log.warning("ego %r: sensors not ready after %d warm-up frames", self.name, frames)

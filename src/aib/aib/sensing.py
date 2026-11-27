@@ -187,6 +187,39 @@ def pack_cloud(xyz, intensity=None, elevation=None, channels=128, fmt="xyzirc", 
     return n, cloud.tobytes()
 
 
+class RenderPose:
+    """When the pose an RTX render takes was the sensor's (scensim issue 196). The host writes a
+    sensor prim's pose before every substep, but the render on the frame's last substep takes the
+    pose written before its first: the pose after the first substep, (n - 1) substeps before the
+    frame's end. Measured with the faces of two parked cars: 25.6 to 26.1, 33.6 to 34.4 and 42.2 to
+    42.7 ms late at 40, 60 and 120 Hz, against (n - 1) dt = 25, 33.3 and 41.7 ms.
+
+    `substep(clock)` after each substep with the world clock at its end; `frame_done()` once the
+    frame is stepped: how long before the frame's end the render's pose was, in seconds."""
+
+    def __init__(self):
+        self.first = None  # the clock at the end of this frame's first substep
+        self.clock = 0.0
+
+    def substep(self, clock):
+        if self.first is None:
+            self.first = clock
+        self.clock = clock
+
+    def frame_done(self):
+        back = 0.0 if self.first is None else self.clock - self.first
+        self.first = None
+        return back
+
+
+def earlier(stamp, seconds):
+    """A ROS time stamp `seconds` before `stamp`, of its own type (builtin_interfaces Time)."""
+    if not seconds:
+        return stamp
+    ns = stamp.sec * 1_000_000_000 + stamp.nanosec - round(seconds * 1e9)
+    return type(stamp)(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000)
+
+
 class ScanGate:
     """Lets each lidar revolution through once. The RTX annotator hands the last finished
     revolution every frame, so a 10 Hz lidar under 20 Hz frames shows each one twice; a driver
