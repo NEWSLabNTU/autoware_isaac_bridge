@@ -75,7 +75,7 @@ class CodeOfTest(unittest.TestCase):
 # the ROS modules aib.runner's node imports, stood in for too
 ROS = ("rclpy,rosgraph_msgs,sensor_msgs,std_msgs,geometry_msgs,nav_msgs,builtin_interfaces,"
        "diagnostic_msgs,tf2_msgs,autoware_vehicle_msgs,autoware_control_msgs,tier4_vehicle_msgs,"
-       "autoware_perception_msgs,autoware_adapi_v1_msgs")
+       "autoware_perception_msgs,autoware_adapi_v1_msgs,autoware_sensing_msgs")
 
 
 def run_fake(module, *args, extra=""):

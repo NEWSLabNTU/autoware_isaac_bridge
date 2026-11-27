@@ -251,6 +251,19 @@ covariance, as before. acb's CARLA GNSS has the same model under the same names
 (`gnss_noise_*` parameters). The defaults live here, not in the vehicle spec: a receiver default
 is not worth moving every spec_hash.
 
+With each fix the receiver also publishes its orientation (scensim issue 195 L1b), as a
+dual-antenna RTK receiver does: `/autoware_orientation`, GnssInsOrientationStamped, the fix's
+stamp and frame, gnss_link's orientation in the map (base_link's composed with the mount)
+turned by an error per fix: roll and pitch from N(0, `attitude_stddev_deg`), yaw from
+N(0, `heading_stddev_deg`), 0.05 and 0.2 deg by default (the ego config's `gnss` block), in
+gnss_link's frame. `rmse_rotation_x`, `_y`, `_z` carry those stddevs in rad. The draws come
+from a second generator spawned from the same seed (numpy SeedSequence), so a seed's position
+errors are what they were before. Autoware's gnss_poser takes its yaw from this message
+(`use_gnss_ins_orientation` true in the kit): without it the yaw was the bearing between
+consecutive fixes, random at a standstill under the position noise, which swung the 0.8 m
+lever arm from the antenna to base_link. The message bindings for Isaac's Python come from
+`build_msgs.sh`, whose default list now has autoware_sensing_msgs (`scensim isaac msgs`).
+
 Frames and topics are the spec's; for the Model 3 they are acb's (`top`, `imu_link`,
 `gnss_link`, on `/sensing/imu/imu_link/imu_raw` and `/sensing/gnss/gnss_link/nav_sat_fix`),
 so Autoware's sensing launch and scensim's runs see what they see on CARLA. The IMU and

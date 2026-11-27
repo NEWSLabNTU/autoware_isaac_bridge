@@ -18,7 +18,8 @@ from .. import lidar_profile as lidarprof
 from ..frames import advance, compose, invert, qrot, rpy_quat
 from ..sensing import (APERTURE_MM, POINT_FORMATS, USD_CAMERA_IN_LINK, GnssNoise, Periodic,
                        RenderPose, earlier,
-                       ScanGate, Ticks, gnss_noise_settings, gnss_reading, imu_reading,
+                       ScanGate, Ticks, gnss_ins_orientation, gnss_noise_settings,
+                       gnss_reading, imu_reading,
                        laser_scan_ranges, laser_scan_settings, motion_distort, pack_cloud,
                        point_times, sample_index)
 
@@ -608,20 +609,23 @@ class Imu:
 class Gnss:
     """From the vehicle's pose: a GBAS fix at the antenna, with the receiver's error
     (`rig.noise`, aib.sensing.GnssNoise), by the map's projector (`projector`, set by Ego; none:
-    TransverseMercator at (0, 0))."""
+    TransverseMercator at (0, 0)); and with each fix the receiver's orientation, gnss_link's in
+    the map with its own error, as GnssInsOrientationStamped (scensim issue 195 L1b: Autoware's
+    gnss_poser takes its yaw from it)."""
 
     renders = False
 
     def __init__(self, rig, ros, stage=None, vehicle_path=None):
         self.rig, self.ros = rig, ros
         self.projector = None
-        self.pub, _ = ros.sensor_publisher(rig)
+        self.pub, self.ins_pub = ros.sensor_publisher(rig)
         self.timer = Periodic(rig.period or 0.1)
         self.noise = GnssNoise(gnss_noise_settings(rig.noise))
         s = self.noise.settings
         log.info("GNSS %s: %s", rig.name,
                  f"error east/north {s['horizontal_stddev_m']} m, up {s['vertical_stddev_m']} m, "
-                 f"bias {s['bias_stddev_m']} m, seed {self.noise.seed}" if self.noise.enabled
+                 f"bias {s['bias_stddev_m']} m, heading {s['heading_stddev_deg']} deg, attitude "
+                 f"{s['attitude_stddev_deg']} deg, seed {self.noise.seed}" if self.noise.enabled
                  else "no error (gnss.enabled false): the antenna's true position")
 
     def ready(self):
@@ -640,6 +644,17 @@ class Gnss:
         msg.latitude, msg.longitude, msg.altitude = lat, lon, alt
         msg.position_covariance, msg.position_covariance_type = self.noise.covariance()
         self.pub.publish(msg)
+        if self.ins_pub is not None:
+            o = self.ros.m["GnssInsOrientationStamped"]()
+            o.header.stamp = msg.header.stamp
+            o.header.frame_id = msg.header.frame_id
+            w, x, y, z = gnss_ins_orientation(state.quat, self.rig.quat,
+                                              self.noise.orientation_error())
+            q = o.orientation.orientation
+            q.w, q.x, q.y, q.z = w, x, y, z
+            (o.orientation.rmse_rotation_x, o.orientation.rmse_rotation_y,
+             o.orientation.rmse_rotation_z) = self.noise.rmse_rotation()
+            self.ins_pub.publish(o)
 
     def before_substep(self, vehicle, state, dt):
         pass  # read from the vehicle's state

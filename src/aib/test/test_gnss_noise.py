@@ -129,3 +129,158 @@ class EgoConfigTest(unittest.TestCase):
     def test_bad_keys_are_refused_with_the_file(self):
         with self.assertRaisesRegex(ValueError, r"e\.yaml: gnss: unknown key"):
             self.load("gnss: {noise_m: 0.02}\n")
+
+
+# --- L1b (scensim issue 195): the receiver's heading and attitude (GnssInsOrientationStamped) ---
+
+from types import SimpleNamespace  # noqa: E402
+
+from aib import frames  # noqa: E402
+from aib.sensing import gnss_ins_orientation  # noqa: E402
+
+DEG = math.pi / 180
+
+
+def errors(settings, n):
+    noise = GnssNoise(gnss_noise_settings(settings))
+    out = []
+    for _ in range(n):
+        noise.offset()
+        out.append(noise.orientation_error())
+    return np.array(out), noise
+
+
+class InsSettingsTest(unittest.TestCase):
+    def test_the_defaults_are_a_dual_antenna_receivers(self):
+        s = gnss_noise_settings({})
+        self.assertEqual((s["heading_stddev_deg"], s["attitude_stddev_deg"]), (0.2, 0.05))
+
+    def test_bad_values_are_refused(self):
+        for k in ("heading_stddev_deg", "attitude_stddev_deg"):
+            with self.assertRaisesRegex(ValueError, f"{k} must be >= 0"):
+                gnss_noise_settings({k: -1.0})
+
+
+class InsNoiseTest(unittest.TestCase):
+    def test_a_still_cars_errors_have_the_configured_spread(self):
+        d, _ = errors({"seed": 11}, 20000)
+        sd, mean = d.std(axis=0), d.mean(axis=0)
+        for axis, sigma in ((0, 0.05 * DEG), (1, 0.05 * DEG), (2, 0.2 * DEG)):
+            self.assertLess(abs(sd[axis] - sigma), 0.02 * sigma, (axis, sd))
+            self.assertLess(abs(mean[axis]), 4 * sigma / math.sqrt(20000), (axis, mean))
+
+    def test_the_same_seed_gives_the_same_headings(self):
+        a, _ = errors({"seed": 5}, 30)
+        b, _ = errors({"seed": 5}, 30)
+        c, _ = errors({"seed": 6}, 30)
+        self.assertTrue(np.array_equal(a, b))
+        self.assertFalse(np.array_equal(a, c))
+
+    def test_disabled_is_the_exact_orientation(self):
+        d, noise = errors({"enabled": False, "seed": 1}, 10)
+        self.assertTrue(np.all(d == 0.0))
+        self.assertEqual(noise.rmse_rotation(), (0.0, 0.0, 0.0))
+
+    def test_the_rmse_fields_carry_the_stddevs_in_rad(self):
+        r = GnssNoise(gnss_noise_settings({"seed": 0})).rmse_rotation()
+        for got, want in zip(r, (0.05 * DEG, 0.05 * DEG, 0.2 * DEG)):
+            self.assertAlmostEqual(got, want)
+
+    def test_the_orientation_is_gnss_links_in_the_map_turned_by_the_error(self):
+        q_base = frames.rpy_quat(0.0, 0.0, 0.7)
+        q_mount = frames.rpy_quat(0.0, 0.0075 * 2, -0.0364)
+        exact = gnss_ins_orientation(q_base, q_mount, (0.0, 0.0, 0.0))
+        self.assertEqual(exact, frames.qmul(q_base, q_mount))
+        level = frames.rpy_quat(0, 0, 0.7)
+        turned = gnss_ins_orientation(level, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.01))
+        want = frames.rpy_quat(0, 0, 0.71)
+        self.assertTrue(all(abs(a - b) < 1e-12 for a, b in zip(turned, want)), (turned, want))
+
+
+class _Msg(SimpleNamespace):
+    pass
+
+
+def _nav():
+    return _Msg(header=_Msg(stamp=None, frame_id=""), status=_Msg(status=0, service=0),
+                latitude=0.0, longitude=0.0, altitude=0.0, position_covariance=None,
+                position_covariance_type=0)
+
+
+def _ins():
+    return _Msg(header=_Msg(stamp=None, frame_id=""),
+                orientation=_Msg(orientation=_Msg(w=1.0, x=0.0, y=0.0, z=0.0),
+                                 rmse_rotation_x=0.0, rmse_rotation_y=0.0, rmse_rotation_z=0.0))
+
+
+class _Pub:
+    def __init__(self):
+        self.sent = []
+
+    def publish(self, m):
+        self.sent.append(m)
+
+
+class GnssSensorTest(unittest.TestCase):
+    """aib.isaac.sensors.Gnss with a stand-in for the ROS side: the INS message beside the fix."""
+
+    def test_the_ins_message_has_the_fixs_stamp_and_frame(self):
+        from aib.isaac.sensors import Gnss
+        from aib.rig import Rig
+
+        rig = Rig.load(RIG).sensors["gnss"]
+        rig.noise = {"seed": 3}
+        nav, ins = _Pub(), _Pub()
+        ros = SimpleNamespace(m={"NavSatFix": _nav, "GnssInsOrientationStamped": _ins},
+                              sensor_publisher=lambda s: (nav, ins))
+        g = Gnss(rig, ros)
+        state = State(position=(10.0, 2.0, 0.0), quat=frames.rpy_quat(0, 0, 0.3))
+        g.publish(state, 0.0, "STAMP")
+        self.assertEqual(len(nav.sent), 1)
+        self.assertEqual(len(ins.sent), 1)
+        fix, o = nav.sent[0], ins.sent[0]
+        self.assertEqual(o.header.stamp, fix.header.stamp)
+        self.assertEqual(o.header.frame_id, fix.header.frame_id)
+        self.assertEqual(o.header.frame_id, "gnss_link")
+        q = o.orientation.orientation
+        exact = frames.qmul(state.quat, rig.quat)
+        # within a few stddevs of gnss_link's exact orientation
+        dq = frames.qmul(frames.qconj(exact), (q.w, q.x, q.y, q.z))
+        angle = 2 * math.atan2(math.sqrt(dq[1] ** 2 + dq[2] ** 2 + dq[3] ** 2), abs(dq[0]))
+        self.assertLess(angle, 6 * 0.2 * DEG)
+        self.assertAlmostEqual(o.orientation.rmse_rotation_z, 0.2 * DEG)
+
+    def test_disabled_publishes_the_exact_orientation(self):
+        from aib.isaac.sensors import Gnss
+        from aib.rig import Rig
+
+        rig = Rig.load(RIG).sensors["gnss"]
+        rig.noise = {"enabled": False}
+        nav, ins = _Pub(), _Pub()
+        ros = SimpleNamespace(m={"NavSatFix": _nav, "GnssInsOrientationStamped": _ins},
+                              sensor_publisher=lambda s: (nav, ins))
+        g = Gnss(rig, ros)
+        state = State(position=(10.0, 2.0, 0.0), quat=frames.rpy_quat(0.01, -0.02, 0.3))
+        g.publish(state, 0.0, "STAMP")
+        q = ins.sent[0].orientation.orientation
+        self.assertEqual((q.w, q.x, q.y, q.z), frames.qmul(state.quat, rig.quat))
+        self.assertEqual(ins.sent[0].orientation.rmse_rotation_x, 0.0)
+
+
+class InsStreamTest(unittest.TestCase):
+    def test_the_heading_leaves_a_seeds_position_errors_as_they_were(self):
+        """243: the orientation draws come from a second generator, so seed 0's position errors
+        are those L1 produced."""
+        plain = GnssNoise(gnss_noise_settings({"seed": 0, "bias_stddev_m": 0.1}))
+        with_ins = GnssNoise(gnss_noise_settings({"seed": 0, "bias_stddev_m": 0.1}))
+        a = [plain.offset() for _ in range(20)]
+        b = []
+        for _ in range(20):
+            b.append(with_ins.offset())
+            with_ins.orientation_error()
+        self.assertEqual(a, b)
+        # and they are L1's: numpy's default_rng(seed), the bias first, then each fix's draw
+        rng = np.random.default_rng(0)
+        bias = rng.normal(0.0, 0.1, 3)
+        first = bias + rng.normal(0.0, np.array([0.02, 0.02, 0.04]))
+        self.assertTrue(np.allclose(a[0], first, rtol=0, atol=1e-15))

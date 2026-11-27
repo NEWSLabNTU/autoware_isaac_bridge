@@ -11,6 +11,7 @@ episode, and the Autoware profile's `clock_guard` ends the stack if it ever goes
 | the rig's lidar topics | PointCloud2 (x y z intensity return_type channel) | the sensor's |
 | the rig's IMU topics | Imu | the sensor's |
 | the rig's GNSS topics | NavSatFix | the sensor's |
+| `/autoware_orientation` (with each GNSS fix; scensim issue 195 L1b) | GnssInsOrientationStamped, gnss_link in the map | the GNSS's |
 | the rig's camera topics (when enabled) | Image, CameraInfo | the sensor's |
 | `/vehicle/status/{velocity,steering,gear,control_mode,turn_indicators,hazard_lights}_status` | Autoware | `base_link` |
 | `/clock` | Clock | |
@@ -56,6 +57,8 @@ MAX_CALLBACKS_PER_FRAME = 16
 LOCKSTEP_DEFAULTS = {"topic": "/localization/pose_estimator/pose_with_covariance",
                      "timeout_s": 1.0, "max_misses": 3}
 LOCKSTEP_REPORT_S = 30.0  # wall seconds between the lockstep's log lines
+# The receiver's orientation (GnssInsOrientationStamped), where the kit's gnss_poser reads it
+INS_TOPIC = "/autoware_orientation"
 DEFAULT_TOPICS = {
     "lidar": "/sensing/lidar/top/pointcloud_before_sync",
     "imu": "/sensing/imu/imu_link/imu_raw",
@@ -73,6 +76,7 @@ class EgoRos:
                                                HazardLightsCommand, HazardLightsReport,
                                                SteeringReport, TurnIndicatorsCommand,
                                                TurnIndicatorsReport, VelocityReport)
+        from autoware_sensing_msgs.msg import GnssInsOrientationStamped
         from autoware_vehicle_msgs.srv import ControlModeCommand
         from rclpy.context import Context
         from rclpy.executors import SingleThreadedExecutor
@@ -86,7 +90,8 @@ class EgoRos:
                       TurnIndicatorsReport=TurnIndicatorsReport,
                       HazardLightsReport=HazardLightsReport, Imu=Imu, NavSatFix=NavSatFix,
                       NavSatStatus=NavSatStatus, PointCloud2=PointCloud2, PointField=PointField,
-                      Image=Image, CameraInfo=CameraInfo, LaserScan=LaserScan)
+                      Image=Image, CameraInfo=CameraInfo, LaserScan=LaserScan,
+                      GnssInsOrientationStamped=GnssInsOrientationStamped)
         self.domain = domain
         self.ctx = Context()
         rclpy.init(context=self.ctx, domain_id=domain)
@@ -291,6 +296,12 @@ class EgoRos:
             if it not in self._sensor_pubs:
                 self._sensor_pubs[it] = self.node.create_publisher(self.m["CameraInfo"], it, qos)
             info = self._sensor_pubs[it]
+        if s.type == "gnss":
+            # the receiver's orientation beside its fix, where gnss_poser reads it
+            if INS_TOPIC not in self._sensor_pubs:
+                self._sensor_pubs[INS_TOPIC] = self.node.create_publisher(
+                    self.m["GnssInsOrientationStamped"], INS_TOPIC, qos)
+            info = self._sensor_pubs[INS_TOPIC]
         return self._sensor_pubs[topic], info
 
     def reset(self):

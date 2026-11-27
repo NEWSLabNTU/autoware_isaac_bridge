@@ -3,6 +3,8 @@
 What the Isaac sensors give is raw (an RTX lidar's points, the body's pose); these turn it
 into what Autoware's messages carry, so the conversions are testable without a simulator.
 """
+import math
+
 from .frames import lat_lon, qconj, qmul, qrot
 
 GRAVITY = 9.81
@@ -49,7 +51,10 @@ def gnss_reading(state, t_base_gnss, projector=None, offset=(0.0, 0.0, 0.0)):
 # does not move every spec_hash; a project overrides it in the ego config's `gnss`. acb has the
 # same model and the same names (its gnss_noise_* parameters).
 GNSS_NOISE_DEFAULTS = {"enabled": True, "horizontal_stddev_m": 0.02, "vertical_stddev_m": 0.04,
-                       "bias_stddev_m": 0.0, "seed": None}
+                       "bias_stddev_m": 0.0, "seed": None,
+                       # the receiver's heading and attitude (scensim issue 195 L1b): a dual-antenna
+                       # RTK receiver's, published as GnssInsOrientationStamped
+                       "heading_stddev_deg": 0.2, "attitude_stddev_deg": 0.05}
 # sensor_msgs/NavSatFix position_covariance_type
 COVARIANCE_TYPE_UNKNOWN, COVARIANCE_TYPE_DIAGONAL_KNOWN = 0, 2
 
@@ -64,9 +69,11 @@ def gnss_noise_settings(over):
     s = {**GNSS_NOISE_DEFAULTS, **over}
     if not isinstance(s["enabled"], bool):
         raise ValueError(f"enabled must be true or false, is {s['enabled']!r}")
-    for k in ("horizontal_stddev_m", "vertical_stddev_m", "bias_stddev_m"):
+    for k in ("horizontal_stddev_m", "vertical_stddev_m", "bias_stddev_m", "heading_stddev_deg",
+              "attitude_stddev_deg"):
         if isinstance(s[k], bool) or not isinstance(s[k], (int, float)) or not s[k] >= 0.0:
-            raise ValueError(f"{k} must be >= 0 (m), is {s[k]!r}")
+            unit = "deg" if k.endswith("_deg") else "m"
+            raise ValueError(f"{k} must be >= 0 ({unit}), is {s[k]!r}")
         s[k] = float(s[k])
     seed = s["seed"]
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
@@ -79,7 +86,12 @@ class GnssNoise:
     N(0, bias_stddev_m) on each axis, plus white noise per fix from N(0, horizontal_stddev_m)
     east and north and N(0, vertical_stddev_m) up. Seeded: the same seed gives the same fixes;
     no seed draws one, kept in `seed` so the run can be replayed. Disabled: no error at all,
-    and no covariance claimed (today's truth)."""
+    and no covariance claimed (today's truth).
+
+    The orientation (L1b, `orientation_error`): roll and pitch from N(0, attitude_stddev_deg),
+    yaw from N(0, heading_stddev_deg), per fix, in gnss_link's frame, from a second generator
+    spawned from the same seed (numpy SeedSequence), so a seed's position errors are those it
+    gave before L1b."""
 
     def __init__(self, settings):
         import secrets
@@ -90,6 +102,10 @@ class GnssNoise:
         self.enabled = settings["enabled"]
         self.seed = settings["seed"] if settings["seed"] is not None else secrets.randbits(63)
         self._rng = np.random.default_rng(self.seed)
+        self._ins_rng = np.random.default_rng(np.random.SeedSequence(self.seed).spawn(1)[0])
+        att, head = (math.radians(settings["attitude_stddev_deg"]),
+                     math.radians(settings["heading_stddev_deg"]))
+        self._rot_sigma = np.array([att, att, head])
         h, v, b = (settings["horizontal_stddev_m"], settings["vertical_stddev_m"],
                    settings["bias_stddev_m"])
         self._sigma = np.array([h, h, v])
@@ -103,6 +119,18 @@ class GnssNoise:
         w = self._rng.normal(0.0, self._sigma)
         return tuple(float(a + e) for a, e in zip(self.bias, w))
 
+    def orientation_error(self):
+        """The next fix's orientation error: (roll, pitch, yaw) in rad, gnss_link's frame."""
+        if not self.enabled:
+            return (0.0, 0.0, 0.0)
+        return tuple(float(e) for e in self._ins_rng.normal(0.0, self._rot_sigma))
+
+    def rmse_rotation(self):
+        """GnssInsOrientation's rmse_rotation_x, _y, _z (rad): the stddevs; disabled, zeros."""
+        if not self.enabled:
+            return (0.0, 0.0, 0.0)
+        return tuple(float(s) for s in self._rot_sigma)
+
     def covariance(self):
         """(NavSatFix position_covariance, its type): the variance of white noise plus the bias's
         spread on the diagonal, known; disabled, zeros of unknown type."""
@@ -111,6 +139,17 @@ class GnssNoise:
         var = [float(s) ** 2 + self._b ** 2 for s in self._sigma]
         return ([var[0], 0.0, 0.0, 0.0, var[1], 0.0, 0.0, 0.0, var[2]],
                 COVARIANCE_TYPE_DIAGONAL_KNOWN)
+
+
+def gnss_ins_orientation(q_base, q_base_gnss, error=(0.0, 0.0, 0.0)):
+    """gnss_link's orientation in the map (wxyz): base_link's composed with the mount, turned by
+    the receiver's `error` (roll, pitch, yaw in rad, gnss_link's frame; GnssNoise)."""
+    q = qmul(q_base, q_base_gnss)
+    if any(error):
+        from .frames import rpy_quat
+
+        q = qmul(q, rpy_quat(*error))
+    return q
 
 
 def ground_truth(state, map_origin=(0.0, 0.0, 0.0)):
