@@ -72,8 +72,8 @@ class GnssTest(unittest.TestCase):
         yaw = math.pi / 2
         s = State(position=(10.0, 0.0, 0.0), quat=(math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)))
         lat, lon, alt = gnss_reading(s, (1.0, 0.0, 1.5))
-        self.assertAlmostEqual(math.radians(lat) * frames.EARTH_RADIUS, 1.0, places=6)
-        self.assertAlmostEqual(alt, 1.5)
+        # turned with the car: the antenna 1 m north of base_link, through TM at (0, 0)
+        self.assertEqual((lat, lon, alt), frames.Projector().lat_lon_alt(10.0, 1.0, 1.5))
 
     def test_mgrs_square_corner(self):
         # 51RUH: zone 51 (column set STUVWXYZ, U = 300 km), odd zone (H = 700 km), band R
@@ -115,11 +115,15 @@ class GnssTest(unittest.TestCase):
         self.assertEqual(gnss_reading(s, (0.0, 0.0, 0.0), p),
                          p.lat_lon_alt(-282.5064, -48.3548, 11.8783))
 
-    def test_no_projector_file_is_the_old_frame(self):
+    def test_no_projector_file_is_transverse_mercator_at_zero(self):
         p = frames.Projector.from_map("/nonexistent")
-        self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
+        # what CARLA's towns declare (carla-town-autoware-maps df499322): scale 1.0
+        tm0 = frames.Projector.from_info({"projector_type": "TransverseMercator",
+                                          "map_origin": {"latitude": 0.0, "longitude": 0.0},
+                                          "scale_factor": 1.0})
+        self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0), tm0.lat_lon_alt(10.0, 20.0, 1.0))
 
-    def test_transverse_mercator_at_zero_is_the_old_frame(self):
+    def test_transverse_mercator_at_zero_is_inverted_exactly(self):
         # what download_maps.sh writes for CARLA's towns (scensim roadmap 063: aib refused it, so no
         # Isaac run on such a map started)
         import tempfile, os
@@ -129,7 +133,10 @@ class GnssTest(unittest.TestCase):
                 fh.write("projector_type: TransverseMercator\nvertical_datum: WGS84\n"
                          "map_origin: {latitude: 0.0, longitude: 0.0, altitude: 0.0}\n")
             p = frames.Projector.from_map(d)
-            self.assertEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
+            # the exact inverse with Autoware's default scale, not the old spherical frame
+            # (scensim issue 195; the vectors in test_projector_vectors.py)
+            self.assertEqual(p.scale, 0.9996)
+            self.assertNotEqual(p.lat_lon_alt(10.0, 20.0, 1.0)[:2], frames.lat_lon(10.0, 20.0))
             # about another origin it was refused; it is projected now (the COSS test above)
             with open(f, "w") as fh:
                 fh.write("projector_type: TransverseMercator\n"

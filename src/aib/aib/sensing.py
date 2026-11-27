@@ -5,7 +5,7 @@ into what Autoware's messages carry, so the conversions are testable without a s
 """
 import math
 
-from .frames import lat_lon, qconj, qmul, qrot
+from .frames import qconj, qmul, qrot
 
 GRAVITY = 9.81
 # PointCloud2 layout Autoware's preprocessor takes (acb's): x y z intensity return_type channel
@@ -40,10 +40,11 @@ def gnss_reading(state, t_base_gnss, projector=None, offset=(0.0, 0.0, 0.0)):
     (east, north, up in the map, m: the receiver's error, GnssNoise.offset), by the map's
     projector (an aib.frames.Projector; none: TransverseMercator at (0, 0))."""
     p = tuple(a + b + e for a, b, e in zip(state.position, qrot(state.quat, t_base_gnss), offset))
-    if projector is not None:
-        return projector.lat_lon_alt(*p)
-    lat, lon = lat_lon(p[0], p[1])
-    return lat, lon, float(p[2])
+    if projector is None:
+        from .frames import Projector
+
+        projector = Projector()
+    return projector.lat_lon_alt(*p)
 
 
 # The GNSS receiver's error (scensim issue 195 A9): an RTK fix's, 2 cm horizontally and twice

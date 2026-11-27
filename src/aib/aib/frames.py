@@ -79,8 +79,9 @@ def kit_transform(sensors_calibration, sensor_kit_calibration, key):
 
 
 def lat_lon(x, y):
-    """Map x/y (east, north, m) to WGS84 degrees about origin (0, 0): the map's projector is
-    TransverseMercator at (0, 0), which within a town of the origin is this to millimetres."""
+    """A spherical approximation of x/y (east, north, m) about (0, 0) in degrees. NOT the map's
+    projector: against Autoware's TransverseMercator at (0, 0) it is 0.9 m off north 200 m from
+    the origin (scensim issue 195); the GNSS uses Projector, which inverts the projector exactly."""
     lat = math.degrees(y / EARTH_RADIUS)
     lon = math.degrees(x / (EARTH_RADIUS * math.cos(math.radians(lat))))
     return lat, lon
@@ -162,30 +163,62 @@ def mgrs_origin(grid):
     raise ValueError(f"MGRS grid {grid}: no northing puts square {col}{row} in band {band}")
 
 
+# The scale autoware_map_projection_loader (1.5.0, load_info_from_yaml) gives TransverseMercator when
+# map_projector_info.yaml has no scale_factor (its scale_factor_for_utm), and MGRS always
+UTM_SCALE = UTM_K0
+# Projectors Autoware accepts but a GNSS fix has no inverse through (indoor and local maps: the
+# golf cart's basements are Local). Such a map still loads; only a fix through it is refused.
+UNSUPPORTED = ("Local", "LocalCartesian", "LocalCartesianUTM", "local")
+
+
 class Projector:
     """World x/y/z (the simulator's, m) to WGS84, as the map's projector reads it back: the
-    world is the map less `map_origin`, and the map is projected by its
-    `map_projector_info.yaml`. MGRS adds its 100 km square's corner and inverts UTM; without
-    a projector file the map is TransverseMercator at (0, 0) (`lat_lon`, CARLA's towns)."""
+    world is the map less `map_origin`, and the map is projected as its `map_projector_info.yaml`
+    declares, inverted exactly (scensim issue 195: the fix not inverted through the map's
+    projector). TransverseMercator about its origin with its scale_factor (Autoware's default
+    0.9996), at (0, 0) too (CARLA's towns); MGRS adds its 100 km square's corner and inverts UTM.
+    Without a projector file: TransverseMercator at (0, 0), scale 1.0, what CARLA's towns declare
+    (carla-town-autoware-maps df499322) and CARLA's own geolocation (+proj=tmerc +lat_0=0 +lon_0=0)."""
 
-    def __init__(self, map_origin=(0.0, 0.0, 0.0), mgrs=None, tm_origin=None):
+    def __init__(self, map_origin=(0.0, 0.0, 0.0), mgrs=None, tm_origin=(0.0, 0.0),
+                 scale=1.0, unsupported=None):
+        self.unsupported = unsupported
         self.origin = tuple(float(v) for v in map_origin)
         self.mgrs = mgrs_origin(mgrs) if mgrs else None
-        # Autoware's TransverseMercatorProjector about (lat, lon): GeographicLib's exact TM,
-        # k0 0.9996, central meridian at the origin, x/y from the origin's projection
+        self.scale = float(scale)
+        # Autoware's TransverseMercatorProjector about (lat, lon): central meridian at the
+        # origin, x/y from the origin's projection, the map's scale
         self.tm = None
-        if tm_origin is not None:
+        if not mgrs:
             lat0, lon0 = (float(v) for v in tm_origin)
-            self.tm = (lon0, tm_meridian_northing(lat0))
-        self.name = (f"MGRS {mgrs}" if mgrs else
-                     f"TransverseMercator at ({tm_origin[0]}, {tm_origin[1]})" if tm_origin else
-                     "TransverseMercator at (0, 0)")
+            self.tm = (lon0, tm_meridian_northing(lat0, self.scale))
+        self.name = (f"{unsupported} (no GNSS inverse)" if unsupported else
+                     f"MGRS {mgrs}" if mgrs else
+                     f"TransverseMercator at ({tm_origin[0]}, {tm_origin[1]}), scale {self.scale}")
+
+    @classmethod
+    def from_info(cls, info, map_origin=(0.0, 0.0, 0.0)):
+        """A map_projector_info (its yaml as a dict) as Autoware 1.5.0 reads it. A Local* map
+        loads, but a fix through it is refused (lat_lon_alt) rather than published wrong; an
+        unknown type is refused here. No projector_type: as no file."""
+        kind = (info or {}).get("projector_type", "")
+        if kind == "":
+            return cls(map_origin)
+        if kind == "MGRS":
+            return cls(map_origin, info["mgrs_grid"])
+        if kind == "TransverseMercator":
+            o = info.get("map_origin") or {}
+            scale = info.get("scale_factor")
+            return cls(map_origin, tm_origin=(float(o.get("latitude", 0.0)),
+                                              float(o.get("longitude", 0.0))),
+                       scale=UTM_SCALE if scale is None else float(scale))
+        if kind in UNSUPPORTED:
+            return cls(map_origin, unsupported=kind)
+        raise ValueError(f"projector_type {kind!r} is not supported (MGRS or TransverseMercator)")
 
     @classmethod
     def from_map(cls, map_dir, map_origin=(0.0, 0.0, 0.0)):
-        """The map dir's projector: MGRS, TransverseMercator (at (0, 0), CARLA's towns, or about
-        any origin, as Autoware projects it), or none. Another projector is refused rather than
-        published wrong."""
+        """The map dir's projector (from_info); no file: TransverseMercator at (0, 0), scale 1.0."""
         import os
 
         import yaml
@@ -195,28 +228,19 @@ class Projector:
             return cls(map_origin)
         with open(path) as f:
             info = yaml.safe_load(f) or {}
-        kind = info.get("projector_type", "")
-        if kind == "MGRS":
-            return cls(map_origin, info["mgrs_grid"])
-        if kind in ("", "Local"):
-            return cls(map_origin)
-        if kind == "TransverseMercator":
-            # what download_maps.sh writes for CARLA's towns: the same frame as no file
-            o = info.get("map_origin") or {}
-            lat0, lon0 = float(o.get("latitude", 0.0)), float(o.get("longitude", 0.0))
-            if lat0 or lon0:
-                return cls(map_origin, tm_origin=(lat0, lon0))
-            return cls(map_origin)
-        raise ValueError(f"{path}: projector_type {kind} is not supported "
-                         "(MGRS, TransverseMercator or none)")
+        try:
+            return cls.from_info(info, map_origin)
+        except ValueError as e:
+            raise ValueError(f"{path}: {e}") from None
 
     def lat_lon_alt(self, x, y, z):
+        if self.unsupported:
+            raise ValueError(f"projector_type {self.unsupported}: a GNSS fix has no inverse "
+                             "through it (MGRS or TransverseMercator); disable the GNSS")
         mx, my, mz = x + self.origin[0], y + self.origin[1], z + self.origin[2]
         if self.tm is not None:
             lon0, n0 = self.tm
-            lat, lon = tm_lat_lon(mx, my + n0, lon0)
-        elif self.mgrs is None:
-            lat, lon = lat_lon(mx, my)
+            lat, lon = tm_lat_lon(mx, my + n0, lon0, self.scale)
         else:
             zone, north, e0, n0 = self.mgrs
             lat, lon = utm_lat_lon(zone, north, e0 + mx, n0 + my)
