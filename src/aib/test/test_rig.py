@@ -291,6 +291,26 @@ def test_the_rig_makes_its_control_component(tmp_path, monkeypatch):
         sys.modules.pop("my_racer_model", None)
 
 
+def test_a_component_is_made_with_the_run_s_session_record(monkeypatch):
+    """scensim 091 W12: the run's session record rides in the ego config's `component.session`,
+    and the rig hands it to sim_vehicle_ecu when it makes the component, which gives a class
+    the session inputs it declares at construction (and refuses one the record lacks)."""
+    import pytest
+    from sim_vehicle_ecu import component as components
+
+    seen = {}
+    monkeypatch.setattr(components, "for_spec",
+                        lambda spec, seed=0, component=None, base=None, session=None:
+                        seen.update(session=session) or "c")
+    rec = {"schema": "scensim.session/1", "battery": {"voltage_v": 7.6, "source": "measured"}}
+    r = Rig.load(RIG, component={"entry_point": "my_racer.sample", "session": rec})
+    assert r.make_component() == "c" and seen["session"] == rec
+    Rig.load(RIG, component={"entry_point": "my_racer.sample"}).make_component()
+    assert seen["session"] is None
+    with pytest.raises(ValueError, match="session"):
+        Rig.load(RIG, component={"entry_point": "my_racer.sample", "session": "7.6 V"})
+
+
 def test_an_ego_config_names_a_component(tmp_path):
     cfg_path = tmp_path / "ego.yaml"
     cfg_path.write_text(f"rig: {RIG}\ncomponent: {{entry_point: my_racer.sample}}\n")
