@@ -71,7 +71,8 @@ class Rig:
     spec_file: str = ""  # that spec's file (spec_path): a component's relative files are its
     spec: dict = field(default_factory=dict)  # that spec's document (the component's car)
     # a run's control component in place of the spec's (scensim roadmap 091):
-    # {entry_point, params, truth: {<declared input>: {latency_s, noise_std}}, paths: [<dir>]}
+    # {entry_point, params, truth: {<declared input>: {latency_s, noise_std}}, paths: [<dir>],
+    #  session: <the run's session record, scensim.session/1: the inputs it declares (W12)>}
     # (paths: where its package's site-packages are, appended to sys.path); empty: the spec's
     component: dict = field(default_factory=dict)
 
@@ -88,8 +89,10 @@ class Rig:
         # directory (scensim 091 W4)
         base = str(Path(self.spec_file).parent) if self.spec_file else None
         if self.component or model == "component":
+            # the run's session record: the session inputs the component declares (scensim 091
+            # W12), given at construction; one the record lacks is refused there
             return components.for_spec(self.spec, seed=seed, component=self.component or None,
-                                       base=base)
+                                       base=base, session=self.component.get("session"))
         return components.EcuComponent.from_calibration(self.ecu)
 
     @classmethod
@@ -130,12 +133,13 @@ class Rig:
         body = doc.get("body") or {}
         spec_hash = str(doc.get("spec_hash") or "")
         spec = spec_doc(path, doc.get("spec"), spec_hash)
-        if component and (set(component) - {"entry_point", "params", "truth", "paths"}
+        if component and (set(component) - {"entry_point", "params", "truth", "paths", "session"}
                           or not component.get("entry_point")
-                          or not isinstance(component.get("paths", []), list)):
+                          or not isinstance(component.get("paths", []), list)
+                          or not isinstance(component.get("session") or {}, dict)):
             raise ValueError(f"component: {{entry_point: <name>, params: {{...}}, truth: "
-                             f"{{<input>: {{latency_s, noise_std}}}}, paths: [<dir>, ...]}}, is "
-                             f"{component!r}")
+                             f"{{<input>: {{latency_s, noise_std}}}}, paths: [<dir>, ...], "
+                             f"session: {{<the run's session record>}}}}, is {component!r}")
         return cls(name=doc.get("name", path.stem),
                    vehicle=VehicleParams.from_dict(doc.get("vehicle"), vehicle_overrides),
                    ecu=Calibration.from_spec(spec, ecu_overrides),

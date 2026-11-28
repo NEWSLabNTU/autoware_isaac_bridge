@@ -376,7 +376,8 @@ def test_a_component_s_files_are_relative_to_the_spec(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(components, "for_spec",
-                        lambda spec, seed=0, component=None, base=None: seen.update(base=base) or "c")
+                        lambda spec, seed=0, component=None, base=None, session=None:
+                        seen.update(base=base) or "c")
     r = Rig.load(RIG, component={"entry_point": "fmu", "params": {"fmu": "models/racer.fmu"}})
     assert Path(r.spec_file).is_file() and Path(r.spec_file).name.endswith((".yaml", ".yml"))
     assert r.make_component() == "c" and seen["base"] == str(Path(r.spec_file).parent)
